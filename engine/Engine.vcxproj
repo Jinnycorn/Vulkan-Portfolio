@@ -191,9 +191,9 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>TRACY_ENABLE;TRACY_ON_DEMAND;TRACY_NO_CALLSTACK;_DEBUG;_CONSOLE;%(PreprocessorDefinitions);GLFW_INCLUDE_VULKAN;GLM_ENABLE_EXPERIMENTAL;GLM_FORCE_RADIANS;GLM_FORCE_DEPTH_ZERO_TO_ONE;NOMINMAX;_CRT_SECURE_NO_WARNINGS</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions);GLFW_INCLUDE_VULKAN;GLM_ENABLE_EXPERIMENTAL;GLM_FORCE_RADIANS;GLM_FORCE_DEPTH_ZERO_TO_ONE;NOMINMAX;_CRT_SECURE_NO_WARNINGS</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <LanguageStandard>stdcpp23</LanguageStandard>
+      <LanguageStandard>stdcpp20</LanguageStandard>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalIncludeDirectories>%VULKAN_SDK%\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
@@ -214,7 +214,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>TRACY_ENABLE;TRACY_ON_DEMAND;TRACY_NO_CALLSTACK;NDEBUG;_CONSOLE;%(PreprocessorDefinitions);GLFW_INCLUDE_VULKAN;GLM_ENABLE_EXPERIMENTAL;GLM_FORCE_RADIANS;GLM_FORCE_DEPTH_ZERO_TO_ONE;NOMINMAX;_CRT_SECURE_NO_WARNINGS</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions);GLFW_INCLUDE_VULKAN;GLM_ENABLE_EXPERIMENTAL;GLM_FORCE_RADIANS;GLM_FORCE_DEPTH_ZERO_TO_ONE;NOMINMAX;_CRT_SECURE_NO_WARNINGS</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
