@@ -1,6 +1,8 @@
 #include "GuiRenderer.h"
 #include "PipelineConfig.h"
 
+#include <filesystem>
+
 namespace hlab {
 
 GuiRenderer::GuiRenderer(Context& ctx, ShaderManager& shaderManager, VkFormat colorFormat, uint32_t maxFramesInFlight)
@@ -50,17 +52,22 @@ GuiRenderer::GuiRenderer(Context& ctx, ShaderManager& shaderManager, VkFormat co
         ImFontConfig config;
         config.MergeMode = false;
 
-        io.Fonts->AddFontFromFileTTF(fontFileName.c_str(), 16.0f * scale_, &config,
-                                     io.Fonts->GetGlyphRangesDefault());
+        if (std::filesystem::exists(fontFileName)) {
+            io.Fonts->AddFontFromFileTTF(fontFileName.c_str(), 16.0f * scale_, &config,
+                                         io.Fonts->GetGlyphRangesDefault());
 
-        config.MergeMode = true;
-
-        io.Fonts->AddFontFromFileTTF(fontFileName.c_str(), 16.0f * scale_, &config,
-                                     io.Fonts->GetGlyphRangesKorean());
+            config.MergeMode = true;
+            io.Fonts->AddFontFromFileTTF(fontFileName.c_str(), 16.0f * scale_, &config,
+                                         io.Fonts->GetGlyphRangesKorean());
+        } else {
+            printLog("Optional Korean font not found: {}. Using ImGui default font.",
+                     fontFileName);
+            io.Fonts->AddFontDefault();
+        }
 
         io.Fonts->GetTexDataAsRGBA32(&fontData, &texWidth, &texHeight);
         if (!fontData) {
-            exitWithMessage("Failed to load font data from: {}", fontFileName);
+            exitWithMessage("Failed to create ImGui font atlas");
         }
 
         fontImage_->createFromPixelData(fontData, texWidth, texHeight, 4, false);
