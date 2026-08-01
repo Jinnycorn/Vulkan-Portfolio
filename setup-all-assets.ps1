@@ -151,7 +151,7 @@ Expand-Archive -Path (Join-Path $bistroDownloads "Exterior.zip") -DestinationPat
 
 foreach ($set in $multipartSets) {
     $firstPart = Join-Path $bistroDownloads "$($set.Name).7z.001"
-    $outputDir = Join-Path $modelsRoot $set.Name
+    $outputDir = Join-Path $bistroModelRoot "LowRes\$($set.Name)"
     New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
     Write-Host "Extracting $($set.Name) ..."
     & $sevenZip x $firstPart "-o$outputDir" -y
@@ -186,9 +186,9 @@ $requiredFiles = @(
     (Join-Path $charactersRoot "Leonard.fbx"),
     (Join-Path $charactersRoot "Bboy Hip Hop Move.fbx"),
     (Join-Path $bistroModelRoot "exterior.obj"),
-    (Join-Path $modelsRoot "BuildingTextures"),
-    (Join-Path $modelsRoot "OtherTextures"),
-    (Join-Path $modelsRoot "PropTextures")
+    (Join-Path $bistroModelRoot "LowRes\BuildingTextures"),
+    (Join-Path $bistroModelRoot "LowRes\OtherTextures"),
+    (Join-Path $bistroModelRoot "LowRes\PropTextures")
 )
 $missing = @($requiredFiles | Where-Object { -not (Test-Path $_) })
 if ($missing.Count -gt 0) {
