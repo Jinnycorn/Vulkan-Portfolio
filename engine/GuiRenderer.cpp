@@ -17,28 +17,62 @@ GuiRenderer::GuiRenderer(Context& ctx, ShaderManager& shaderManager, VkFormat co
 
     pushConsts_.setStageFlags(VK_SHADER_STAGE_VERTEX_BIT);
 
-    // ImGui 초기화, 스타일 설정
+    // Compact portfolio inspector: dark navy surfaces with a restrained blue accent.
     ImGui::CreateContext();
+    ImGui::StyleColorsDark();
+
     ImGuiStyle& style = ImGui::GetStyle();
-    style.Colors[ImGuiCol_TitleBg] = ImVec4(1.0f, 0.0f, 0.0f, 1.0f);
-    style.Colors[ImGuiCol_TitleBgActive] = ImVec4(1.0f, 0.0f, 0.0f, 1.0f);
-    style.Colors[ImGuiCol_TitleBgCollapsed] = ImVec4(1.0f, 0.0f, 0.0f, 0.1f);
-    style.Colors[ImGuiCol_MenuBarBg] = ImVec4(1.0f, 0.0f, 0.0f, 0.4f);
-    style.Colors[ImGuiCol_Header] = ImVec4(0.8f, 0.0f, 0.0f, 0.4f);
-    style.Colors[ImGuiCol_HeaderActive] = ImVec4(1.0f, 0.0f, 0.0f, 0.4f);
-    style.Colors[ImGuiCol_HeaderHovered] = ImVec4(1.0f, 0.0f, 0.0f, 0.4f);
-    style.Colors[ImGuiCol_FrameBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.8f);
-    style.Colors[ImGuiCol_CheckMark] = ImVec4(1.0f, 0.0f, 0.0f, 0.8f);
-    style.Colors[ImGuiCol_SliderGrab] = ImVec4(1.0f, 0.0f, 0.0f, 0.4f);
-    style.Colors[ImGuiCol_SliderGrabActive] = ImVec4(1.0f, 0.0f, 0.0f, 0.8f);
-    style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(1.0f, 1.0f, 1.0f, 0.1f);
-    style.Colors[ImGuiCol_FrameBgActive] = ImVec4(1.0f, 1.0f, 1.0f, 0.2f);
-    style.Colors[ImGuiCol_Button] = ImVec4(1.0f, 0.0f, 0.0f, 0.4f);
-    style.Colors[ImGuiCol_ButtonHovered] = ImVec4(1.0f, 0.0f, 0.0f, 0.6f);
-    style.Colors[ImGuiCol_ButtonActive] = ImVec4(1.0f, 0.0f, 0.0f, 0.8f);
+    style.WindowPadding = ImVec2(14.0f, 14.0f);
+    style.FramePadding = ImVec2(9.0f, 6.0f);
+    style.CellPadding = ImVec2(8.0f, 6.0f);
+    style.ItemSpacing = ImVec2(8.0f, 8.0f);
+    style.ItemInnerSpacing = ImVec2(6.0f, 5.0f);
+    style.IndentSpacing = 16.0f;
+    style.ScrollbarSize = 11.0f;
+    style.GrabMinSize = 10.0f;
+    style.WindowRounding = 8.0f;
+    style.ChildRounding = 6.0f;
+    style.FrameRounding = 5.0f;
+    style.PopupRounding = 6.0f;
+    style.ScrollbarRounding = 8.0f;
+    style.GrabRounding = 5.0f;
+    style.TabRounding = 5.0f;
+    style.WindowBorderSize = 1.0f;
+    style.FrameBorderSize = 0.0f;
+
+    ImVec4* colors = style.Colors;
+    colors[ImGuiCol_Text] = ImVec4(0.90f, 0.93f, 0.97f, 1.00f);
+    colors[ImGuiCol_TextDisabled] = ImVec4(0.48f, 0.54f, 0.64f, 1.00f);
+    colors[ImGuiCol_WindowBg] = ImVec4(0.035f, 0.055f, 0.090f, 0.96f);
+    colors[ImGuiCol_ChildBg] = ImVec4(0.045f, 0.070f, 0.110f, 0.92f);
+    colors[ImGuiCol_PopupBg] = ImVec4(0.040f, 0.060f, 0.095f, 0.98f);
+    colors[ImGuiCol_Border] = ImVec4(0.16f, 0.22f, 0.32f, 0.85f);
+    colors[ImGuiCol_FrameBg] = ImVec4(0.075f, 0.105f, 0.155f, 1.00f);
+    colors[ImGuiCol_FrameBgHovered] = ImVec4(0.10f, 0.16f, 0.24f, 1.00f);
+    colors[ImGuiCol_FrameBgActive] = ImVec4(0.12f, 0.20f, 0.30f, 1.00f);
+    colors[ImGuiCol_TitleBg] = ImVec4(0.035f, 0.055f, 0.090f, 1.00f);
+    colors[ImGuiCol_TitleBgActive] = ImVec4(0.045f, 0.075f, 0.120f, 1.00f);
+    colors[ImGuiCol_CheckMark] = ImVec4(0.29f, 0.60f, 1.00f, 1.00f);
+    colors[ImGuiCol_SliderGrab] = ImVec4(0.25f, 0.52f, 0.90f, 1.00f);
+    colors[ImGuiCol_SliderGrabActive] = ImVec4(0.37f, 0.68f, 1.00f, 1.00f);
+    colors[ImGuiCol_Button] = ImVec4(0.10f, 0.17f, 0.26f, 1.00f);
+    colors[ImGuiCol_ButtonHovered] = ImVec4(0.15f, 0.30f, 0.48f, 1.00f);
+    colors[ImGuiCol_ButtonActive] = ImVec4(0.18f, 0.40f, 0.66f, 1.00f);
+    colors[ImGuiCol_Header] = ImVec4(0.09f, 0.15f, 0.23f, 1.00f);
+    colors[ImGuiCol_HeaderHovered] = ImVec4(0.14f, 0.28f, 0.45f, 1.00f);
+    colors[ImGuiCol_HeaderActive] = ImVec4(0.17f, 0.37f, 0.61f, 1.00f);
+    colors[ImGuiCol_Separator] = ImVec4(0.14f, 0.20f, 0.29f, 1.00f);
+    colors[ImGuiCol_Tab] = ImVec4(0.060f, 0.090f, 0.135f, 1.00f);
+    colors[ImGuiCol_TabHovered] = ImVec4(0.16f, 0.33f, 0.54f, 1.00f);
+    colors[ImGuiCol_TabActive] = ImVec4(0.12f, 0.25f, 0.42f, 1.00f);
+    colors[ImGuiCol_ScrollbarBg] = ImVec4(0.025f, 0.040f, 0.065f, 0.80f);
+    colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.16f, 0.23f, 0.33f, 1.00f);
+    colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.23f, 0.34f, 0.48f, 1.00f);
+
     style.ScaleAllSizes(scale_);
     ImGuiIO& io = ImGui::GetIO();
     io.FontGlobalScale = scale_;
+    io.ConfigWindowsMoveFromTitleBarOnly = true;
 
     {
         // const string fontFileName = "../../assets/Roboto-Medium.ttf"; // English font
