@@ -159,6 +159,7 @@ void Application::setupCallbacks()
             case GLFW_KEY_P:
                 break;
             case GLFW_KEY_F1:
+                app->showUi_ = !app->showUi_;
                 break;
             case GLFW_KEY_F2:
                 if (app->camera_.type == hlab::Camera::CameraType::lookat) {
@@ -669,8 +670,6 @@ void Application::updateGui()
 {
     TRACY_CPU_SCOPE("Application::updateGui");
 
-    static float scale = 1.4f;
-
     ImGuiIO& io = ImGui::GetIO();
 
     io.DisplaySize = ImVec2(float(windowSize_.width), float(windowSize_.height));
@@ -687,10 +686,29 @@ void Application::updateGui()
         ImGui::NewFrame();
     }
 
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
-    ImGui::SetNextWindowPos(ImVec2(10 * scale, 10 * scale), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(0, 0), ImGuiCond_FirstUseEver);
-    ImGui::Begin("벌컨 실시간 렌더링 예제", nullptr, ImGuiWindowFlags_None);
+    if (!showUi_) {
+        ImGui::Render();
+        return;
+    }
+
+    const float panelWidth = std::clamp(float(windowSize_.width) * 0.30f, 340.0f, 410.0f);
+    ImGui::SetNextWindowPos(ImVec2(float(windowSize_.width) - panelWidth, 0.0f),
+                            ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(panelWidth, float(windowSize_.height)), ImGuiCond_Always);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    constexpr ImGuiWindowFlags inspectorFlags =
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoTitleBar;
+    ImGui::Begin("##PortfolioInspector", nullptr, inspectorFlags);
+
+    ImGui::TextColored(ImVec4(0.37f, 0.68f, 1.0f, 1.0f), "VULKAN PORTFOLIO");
+    ImGui::SameLine();
+    ImGui::TextDisabled("BISTRO / MX110");
+    ImGui::TextDisabled("F1  Hide inspector");
+    ImGui::Separator();
+
+    if (ImGui::BeginTabBar("##InspectorTabs", ImGuiTabBarFlags_FittingPolicyScroll)) {
+        if (ImGui::BeginTabItem("Scene")) {
 
     // Enhanced performance display
     ImGui::Text("CPU FPS: %.1f (%.2f ms/frame)", currentFPS_,
@@ -953,18 +971,31 @@ void Application::updateGui()
         }
     }
 
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Camera")) {
+            renderCameraControlWindow();
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Environment")) {
+            renderHDRControlWindow();
+            ImGui::Spacing();
+            renderSSAOControlWindow();
+            ImGui::EndTabItem();
+        }
+
+        if (ImGui::BeginTabItem("Post FX")) {
+            renderPostProcessingControlWindow();
+            ImGui::EndTabItem();
+        }
+
+        ImGui::EndTabBar();
+    }
+
     ImGui::End();
     ImGui::PopStyleVar();
-
-    // Camera Control Window
-    renderCameraControlWindow();
-
-    renderHDRControlWindow();
-
-    renderPostProcessingControlWindow();
-
-    // Add this line:
-    renderSSAOControlWindow();
 
     {
         TRACY_CPU_SCOPE("ImGui Render");
@@ -975,13 +1006,6 @@ void Application::updateGui()
 // ADD: HDR Control window method (based on Ex10_Example)
 void Application::renderHDRControlWindow()
 {
-    ImGui::SetNextWindowPos(ImVec2(320, 10), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(350, 350), ImGuiCond_FirstUseEver);
-
-    if (!ImGui::Begin("HDR Skybox Controls")) {
-        ImGui::End();
-        return;
-    }
 
     // HDR Environment Controls
     if (ImGui::CollapsingHeader("HDR Environment", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -1049,19 +1073,12 @@ void Application::renderHDRControlWindow()
         }
     }
 
-    ImGui::End();
+
 }
 
 // ADD: Post-Processing Control window method (based on Ex11_PostProcessingExample)
 void Application::renderPostProcessingControlWindow()
 {
-    ImGui::SetNextWindowPos(ImVec2(680, 10), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(400, 600), ImGuiCond_FirstUseEver);
-
-    if (!ImGui::Begin("Post-Processing Controls")) {
-        ImGui::End();
-        return;
-    }
 
     // Tone Mapping Controls
     if (ImGui::CollapsingHeader("Tone Mapping", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -1429,19 +1446,12 @@ void Application::renderPostProcessingControlWindow()
         }
     }
 
-    ImGui::End();
+
 }
 
 // NEW: Camera Control window method
 void Application::renderCameraControlWindow()
 {
-    ImGui::SetNextWindowPos(ImVec2(10, 350), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(300, 400), ImGuiCond_FirstUseEver);
-
-    if (!ImGui::Begin("Camera Controls")) {
-        ImGui::End();
-        return;
-    }
 
     // Camera Information Display
     if (ImGui::CollapsingHeader("Camera Information", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -1562,7 +1572,7 @@ void Application::renderCameraControlWindow()
         ImGui::BulletText("F5: Toggle GPU occlusion culling");
     }
 
-    ImGui::End();
+
 }
 
 void Application::handleMouseMove(int32_t x, int32_t y)
@@ -1683,13 +1693,6 @@ void Application::updatePerformanceMetrics(float deltaTime)
 // ADD: SSAO Control window method (new function)
 void Application::renderSSAOControlWindow()
 {
-    ImGui::SetNextWindowPos(ImVec2(10, 780), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(300, 200), ImGuiCond_FirstUseEver);
-
-    if (!ImGui::Begin("SSAO Controls")) {
-        ImGui::End();
-        return;
-    }
 
     if (ImGui::CollapsingHeader("SSAO Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::SliderFloat("SSAO Radius", &renderer_->ssaoOptionsUBO().ssaoRadius, 0.01f, 1.0f,
@@ -1754,7 +1757,7 @@ void Application::renderSSAOControlWindow()
         }
     }
 
-    ImGui::End();
+
 }
 
 } // namespace hlab
