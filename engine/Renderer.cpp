@@ -519,13 +519,23 @@ void Renderer::draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swap
                         TRACY_CPU_SCOPE("DrawModels");
 
                         VkDeviceSize offsets[1]{0};
-                        size_t visibleMeshCount = 0;
                         size_t totalMeshCount = 0;
                         size_t globalMeshIndex = 0;
 
+                        struct DrawItem
+                        {
+                            Model* model;
+                            Mesh* mesh;
+                            size_t queryMeshIndex;
+                            float distanceSquared;
+                        };
+
+                        vector<DrawItem> drawItems;
+                        drawItems.reserve(meshQueryCount_);
+
                         for (size_t j = 0; j < models.size(); j++) {
-                            // Render all meshes in this model. Keep the global index stable even
-                            // when a model is hidden so query results always map to the same mesh.
+                            // Keep the global index stable even when a model is hidden so query
+                            // results always map to the same mesh.
                             for (size_t i = 0; i < models[j]->meshes().size(); i++) {
                                 auto& mesh = models[j]->meshes()[i];
                                 const size_t queryMeshIndex = globalMeshIndex++;
@@ -546,41 +556,57 @@ void Renderer::draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swap
                                     continue;
                                 }
 
-                                visibleMeshCount++;
+                                const glm::vec3 toMesh =
+                                    mesh.worldBounds.getCenter() - sceneUBO_.cameraPos;
+                                drawItems.push_back(
+                                    {models[j].get(), &mesh, queryMeshIndex,
+                                     glm::dot(toMesh, toMesh)});
+                            }
+                        }
 
-                                PbrPushConstants pushConstants;
-                                pushConstants.model = models[j]->modelMatrix();
-                                pushConstants.materialIndex = mesh.materialIndex_;
-                                memcpy(pushConstants.coeffs, models[j]->coeffs(),
-                                       sizeof(pushConstants.coeffs));
-                                vkCmdPushConstants(cmd, pipelines_.at(pipelineName)->pipelineLayout(),
-                                                   VK_SHADER_STAGE_VERTEX_BIT |
-                                                       VK_SHADER_STAGE_FRAGMENT_BIT,
-                                                   0, sizeof(PbrPushConstants), &pushConstants);
+                        // Front-to-back submission improves early depth rejection and makes the
+                        // following-frame occlusion query results substantially more useful.
+                        if (pipelineName == "pbrDeferred") {
+                            std::sort(drawItems.begin(), drawItems.end(),
+                                      [](const DrawItem& a, const DrawItem& b) {
+                                          return a.distanceSquared < b.distanceSquared;
+                                      });
+                        }
 
-                                // Bind vertex and index buffers
-                                vkCmdBindVertexBuffers(cmd, 0, 1, &mesh.vertexBuffer_, offsets);
-                                vkCmdBindIndexBuffer(cmd, mesh.indexBuffer_, 0, VK_INDEX_TYPE_UINT32);
+                        const size_t visibleMeshCount = drawItems.size();
+                        for (const DrawItem& item : drawItems) {
+                            PbrPushConstants pushConstants;
+                            pushConstants.model = item.model->modelMatrix();
+                            pushConstants.materialIndex = item.mesh->materialIndex_;
+                            memcpy(pushConstants.coeffs, item.model->coeffs(),
+                                   sizeof(pushConstants.coeffs));
+                            vkCmdPushConstants(cmd, pipelines_.at(pipelineName)->pipelineLayout(),
+                                               VK_SHADER_STAGE_VERTEX_BIT |
+                                                   VK_SHADER_STAGE_FRAGMENT_BIT,
+                                               0, sizeof(PbrPushConstants), &pushConstants);
 
-                                const bool issueOcclusionQuery =
-                                    occlusionPass && occlusionCullingEnabled_ &&
-                                    occlusionQueryPool_ != VK_NULL_HANDLE &&
-                                    queryMeshIndex < meshQueryCount_;
-                                if (issueOcclusionQuery) {
-                                    const uint32_t query =
-                                        currentFrame * meshQueryCount_ +
-                                        static_cast<uint32_t>(queryMeshIndex);
-                                    vkCmdBeginQuery(cmd, occlusionQueryPool_, query, 0);
-                                    vkCmdDrawIndexed(cmd,
-                                                     static_cast<uint32_t>(mesh.indices_.size()), 1,
-                                                     0, 0, 0);
-                                    vkCmdEndQuery(cmd, occlusionQueryPool_, query);
-                                    occlusionQueryIssued_[currentFrame][queryMeshIndex] = 1;
-                                } else {
-                                    vkCmdDrawIndexed(cmd,
-                                                     static_cast<uint32_t>(mesh.indices_.size()), 1,
-                                                     0, 0, 0);
-                                }
+                            vkCmdBindVertexBuffers(cmd, 0, 1, &item.mesh->vertexBuffer_, offsets);
+                            vkCmdBindIndexBuffer(cmd, item.mesh->indexBuffer_, 0,
+                                                 VK_INDEX_TYPE_UINT32);
+
+                            const bool issueOcclusionQuery =
+                                pipelineName == "pbrDeferred" && occlusionCullingEnabled_ &&
+                                occlusionQueryPool_ != VK_NULL_HANDLE &&
+                                item.queryMeshIndex < meshQueryCount_;
+                            if (issueOcclusionQuery) {
+                                const uint32_t query =
+                                    currentFrame * meshQueryCount_ +
+                                    static_cast<uint32_t>(item.queryMeshIndex);
+                                vkCmdBeginQuery(cmd, occlusionQueryPool_, query, 0);
+                                vkCmdDrawIndexed(
+                                    cmd, static_cast<uint32_t>(item.mesh->indices_.size()), 1, 0, 0,
+                                    0);
+                                vkCmdEndQuery(cmd, occlusionQueryPool_, query);
+                                occlusionQueryIssued_[currentFrame][item.queryMeshIndex] = 1;
+                            } else {
+                                vkCmdDrawIndexed(
+                                    cmd, static_cast<uint32_t>(item.mesh->indices_.size()), 1, 0, 0,
+                                    0);
                             }
                         }
 
