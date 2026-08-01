@@ -6,6 +6,26 @@ project(HonglabVulkan VERSION 1.0.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+
+# Fast, asset-free smoke test used by setup-basic.ps1.
+option(HLAB_BASIC_ONLY "Build only the minimal Vulkan context smoke test" OFF)
+if(HLAB_BASIC_ONLY)
+    find_package(Vulkan REQUIRED)
+
+    add_executable(Basic_Context
+        examples/Basic_Context/Basic_Context.cpp
+    )
+    target_link_libraries(Basic_Context PRIVATE Vulkan::Vulkan)
+    target_compile_features(Basic_Context PRIVATE cxx_std_20)
+
+    if(MSVC)
+        target_compile_options(Basic_Context PRIVATE /W4 /permissive-)
+    endif()
+
+    return()
+endif()
+
+
 # Linux: find KTX manually BEFORE vcpkg setup
 if(UNIX)
     set(KTX_ROOT "/mnt/d/UbuntuTestFolder/KTX-Software")
