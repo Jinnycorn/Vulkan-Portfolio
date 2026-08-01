@@ -131,6 +131,50 @@ void Image2D::createSolid(int width, int height, uint8_t rgba[4])
     createFromPixelData(pixelData.data(), width, height, channels, false);
 }
 
+void Image2D::createSolidCubemap(uint8_t rgba[4])
+{
+    constexpr uint32_t faceCount = 6;
+    constexpr VkDeviceSize bytesPerPixel = 4;
+
+    vector<unsigned char> pixelData(faceCount * bytesPerPixel);
+    for (uint32_t face = 0; face < faceCount; ++face) {
+        for (uint32_t channel = 0; channel < bytesPerPixel; ++channel) {
+            pixelData[face * bytesPerPixel + channel] = rgba[channel];
+        }
+    }
+
+    createImage(VK_FORMAT_R8G8B8A8_UNORM, 1, 1, VK_SAMPLE_COUNT_1_BIT,
+                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                VK_IMAGE_ASPECT_COLOR_BIT, 1, faceCount, VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+                VK_IMAGE_VIEW_TYPE_CUBE);
+
+    MappedBuffer stagingBuffer(ctx_);
+    stagingBuffer.createStagingBuffer(pixelData.size(), pixelData.data());
+
+    CommandBuffer copyCmd = ctx_.createTransferCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+    barrierHelper().transitionTo(copyCmd.handle(), VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                 VK_PIPELINE_STAGE_2_TRANSFER_BIT);
+
+    vector<VkBufferImageCopy> regions(faceCount);
+    for (uint32_t face = 0; face < faceCount; ++face) {
+        regions[face].bufferOffset = face * bytesPerPixel;
+        regions[face].imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        regions[face].imageSubresource.mipLevel = 0;
+        regions[face].imageSubresource.baseArrayLayer = face;
+        regions[face].imageSubresource.layerCount = 1;
+        regions[face].imageExtent = {1, 1, 1};
+    }
+
+    vkCmdCopyBufferToImage(copyCmd.handle(), stagingBuffer.buffer(), image_,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, faceCount, regions.data());
+
+    barrierHelper().transitionTo(copyCmd.handle(), VK_ACCESS_2_SHADER_READ_BIT,
+                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                 VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+    copyCmd.submitAndWait();
+}
+
 std::string fixPath(const std::string& path) // for linux path
 {
     std::string fixed = path;
