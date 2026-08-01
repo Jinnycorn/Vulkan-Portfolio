@@ -3,8 +3,76 @@
 #include "TracyProfiler.h" // Add Tracy macros wrapper
 #include <stb_image.h>
 #include <cstdlib>
+#include <algorithm>
 
 namespace hlab {
+
+Renderer::~Renderer()
+{
+    if (occlusionQueryPool_ != VK_NULL_HANDLE) {
+        vkDestroyQueryPool(ctx_.device(), occlusionQueryPool_, nullptr);
+        occlusionQueryPool_ = VK_NULL_HANDLE;
+    }
+}
+
+void Renderer::createOcclusionResources(const vector<unique_ptr<Model>>& models)
+{
+    meshQueryCount_ = 0;
+    for (const auto& model : models) {
+        meshQueryCount_ += static_cast<uint32_t>(model->meshes().size());
+    }
+
+    if (meshQueryCount_ == 0) {
+        return;
+    }
+
+    VkQueryPoolCreateInfo queryPoolInfo{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+    queryPoolInfo.queryType = VK_QUERY_TYPE_OCCLUSION;
+    queryPoolInfo.queryCount = meshQueryCount_ * kMaxFramesInFlight_;
+    check(vkCreateQueryPool(ctx_.device(), &queryPoolInfo, nullptr, &occlusionQueryPool_));
+
+    occlusionVisible_.assign(meshQueryCount_, 1);
+    occlusionMissCounts_.assign(meshQueryCount_, 0);
+    occlusionQueryIssued_.assign(kMaxFramesInFlight_, vector<uint8_t>(meshQueryCount_, 0));
+
+    printLog("GPU occlusion culling initialized for {} meshes", meshQueryCount_);
+}
+
+void Renderer::resolveOcclusionQueries(uint32_t currentFrame)
+{
+    if (!occlusionCullingEnabled_ || occlusionQueryPool_ == VK_NULL_HANDLE ||
+        currentFrame >= occlusionQueryIssued_.size()) {
+        return;
+    }
+
+    const uint32_t queryBase = currentFrame * meshQueryCount_;
+    for (uint32_t i = 0; i < meshQueryCount_; ++i) {
+        if (!occlusionQueryIssued_[currentFrame][i]) {
+            continue;
+        }
+
+        uint64_t passedSamples = 0;
+        VkResult result = vkGetQueryPoolResults(
+            ctx_.device(), occlusionQueryPool_, queryBase + i, 1, sizeof(passedSamples),
+            &passedSamples, sizeof(passedSamples), VK_QUERY_RESULT_64_BIT);
+
+        if (result != VK_SUCCESS) {
+            continue;
+        }
+
+        if (passedSamples > 0) {
+            occlusionVisible_[i] = 1;
+            occlusionMissCounts_[i] = 0;
+        } else {
+            // Require two completed zero-sample results to avoid one-frame false positives.
+            occlusionMissCounts_[i] =
+                static_cast<uint8_t>(std::min<uint32_t>(occlusionMissCounts_[i] + 1, 2));
+            if (occlusionMissCounts_[i] >= 2) {
+                occlusionVisible_[i] = 0;
+            }
+        }
+    }
+}
 
 Renderer::Renderer(Context& ctx, ShaderManager& shaderManager, const uint32_t& kMaxFramesInFlight,
                    const string& kAssetsPathPrefix, const string& kShaderPathPrefix_,
@@ -17,6 +85,8 @@ Renderer::Renderer(Context& ctx, ShaderManager& shaderManager, const uint32_t& k
       materialTextures_(std::make_unique<TextureManager>(ctx))
 {
     TRACY_CPU_SCOPE("Renderer::Constructor");
+
+    createOcclusionResources(models);
 
     {
         TRACY_CPU_SCOPE("Create Pipelines");
@@ -194,6 +264,11 @@ void Renderer::update(Camera& camera, vector<unique_ptr<Model>>& models, uint32_
     TRACY_CPU_SCOPE("Renderer::update");
 
     {
+        TRACY_CPU_SCOPE("Resolve Occlusion Queries");
+        resolveOcclusionQueries(currentFrame);
+    }
+
+    {
         TRACY_CPU_SCOPE("Update View Frustum");
         // Update view frustum based on current camera view-projection matrix
         updateViewFrustum(camera.matrices.perspective * camera.matrices.view);
@@ -270,6 +345,17 @@ void Renderer::draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swap
                     vector<unique_ptr<Model>>& models, VkViewport viewport, VkRect2D scissor)
 {
     TRACY_CPU_SCOPE("Renderer::draw");
+
+    const bool periodicOcclusionRetest =
+        (renderFrameCounter_ % kOcclusionRetestInterval) == 0;
+    cullingStats_.occlusionCulledMeshes = 0;
+
+    if (occlusionCullingEnabled_ && occlusionQueryPool_ != VK_NULL_HANDLE) {
+        const uint32_t queryBase = currentFrame * meshQueryCount_;
+        vkCmdResetQueryPool(cmd, occlusionQueryPool_, queryBase, meshQueryCount_);
+        std::fill(occlusionQueryIssued_[currentFrame].begin(),
+                  occlusionQueryIssued_[currentFrame].end(), uint8_t{0});
+    }
 
     for (auto& renderNode : renderGraph_.renderNodes_) {
 
@@ -412,21 +498,31 @@ void Renderer::draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swap
                         VkDeviceSize offsets[1]{0};
                         size_t visibleMeshCount = 0;
                         size_t totalMeshCount = 0;
+                        size_t globalMeshIndex = 0;
 
                         for (size_t j = 0; j < models.size(); j++) {
-                            if (!models[j]->visible()) {
-                                continue;
-                            }
-
-                            // Render all meshes in this model
+                            // Render all meshes in this model. Keep the global index stable even
+                            // when a model is hidden so query results always map to the same mesh.
                             for (size_t i = 0; i < models[j]->meshes().size(); i++) {
                                 auto& mesh = models[j]->meshes()[i];
+                                const size_t queryMeshIndex = globalMeshIndex++;
                                 totalMeshCount++;
 
-                                // Skip culled meshes
-                                if (mesh.isCulled) {
+                                if (!models[j]->visible() || mesh.isCulled) {
                                     continue;
                                 }
+
+                                const bool occlusionPass = pipelineName == "pbrDeferred";
+                                const bool isTemporallyOccluded =
+                                    occlusionPass && occlusionCullingEnabled_ &&
+                                    !periodicOcclusionRetest &&
+                                    queryMeshIndex < occlusionVisible_.size() &&
+                                    occlusionVisible_[queryMeshIndex] == 0;
+                                if (isTemporallyOccluded) {
+                                    ++cullingStats_.occlusionCulledMeshes;
+                                    continue;
+                                }
+
                                 visibleMeshCount++;
 
                                 PbrPushConstants pushConstants;
@@ -443,9 +539,25 @@ void Renderer::draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swap
                                 vkCmdBindVertexBuffers(cmd, 0, 1, &mesh.vertexBuffer_, offsets);
                                 vkCmdBindIndexBuffer(cmd, mesh.indexBuffer_, 0, VK_INDEX_TYPE_UINT32);
 
-                                // Draw the mesh
-                                vkCmdDrawIndexed(cmd, static_cast<uint32_t>(mesh.indices_.size()), 1, 0,
-                                                 0, 0);
+                                const bool issueOcclusionQuery =
+                                    occlusionPass && occlusionCullingEnabled_ &&
+                                    occlusionQueryPool_ != VK_NULL_HANDLE &&
+                                    queryMeshIndex < meshQueryCount_;
+                                if (issueOcclusionQuery) {
+                                    const uint32_t query =
+                                        currentFrame * meshQueryCount_ +
+                                        static_cast<uint32_t>(queryMeshIndex);
+                                    vkCmdBeginQuery(cmd, occlusionQueryPool_, query, 0);
+                                    vkCmdDrawIndexed(cmd,
+                                                     static_cast<uint32_t>(mesh.indices_.size()), 1,
+                                                     0, 0, 0);
+                                    vkCmdEndQuery(cmd, occlusionQueryPool_, query);
+                                    occlusionQueryIssued_[currentFrame][queryMeshIndex] = 1;
+                                } else {
+                                    vkCmdDrawIndexed(cmd,
+                                                     static_cast<uint32_t>(mesh.indices_.size()), 1,
+                                                     0, 0, 0);
+                                }
                             }
                         }
 
@@ -454,6 +566,11 @@ void Renderer::draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swap
                         TRACY_PLOT("TotalMeshes", static_cast<int64_t>(totalMeshCount));
                         TRACY_PLOT("CulledMeshes",
                                    static_cast<int64_t>(totalMeshCount - visibleMeshCount));
+                        if (pipelineName == "pbrDeferred") {
+                            TRACY_PLOT(
+                                "OcclusionCulledMeshes",
+                                static_cast<int64_t>(cullingStats_.occlusionCulledMeshes));
+                        }
                     }
                 }
             }
@@ -464,6 +581,8 @@ void Renderer::draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swap
             vkCmdEndRendering(cmd);
         }
     }
+
+    ++renderFrameCounter_;
 }
 
 void Renderer::createPipelines(const VkFormat swapChainColorFormat, const VkFormat depthFormat)
@@ -910,6 +1029,20 @@ void Renderer::setFrustumCullingEnabled(bool enabled)
 bool Renderer::isFrustumCullingEnabled() const
 {
     return frustumCullingEnabled_;
+}
+
+void Renderer::setOcclusionCullingEnabled(bool enabled)
+{
+    occlusionCullingEnabled_ = enabled;
+    if (!enabled) {
+        std::fill(occlusionVisible_.begin(), occlusionVisible_.end(), uint8_t{1});
+        std::fill(occlusionMissCounts_.begin(), occlusionMissCounts_.end(), uint8_t{0});
+    }
+}
+
+bool Renderer::isOcclusionCullingEnabled() const
+{
+    return occlusionCullingEnabled_;
 }
 
 const CullingStats& Renderer::getCullingStats() const
