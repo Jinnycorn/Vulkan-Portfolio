@@ -53,53 +53,107 @@ auto Image2D::height() const -> uint32_t
     return height_;
 }
 
-void Image2D::createFromPixelData(unsigned char* pixelData, int width, int height, int channels,
-                                  bool sRGB)
+void Image2D::createFromPixelData(unsigned char* pixelData, int width, int height,
+                                  int channels, bool sRGB)
 {
     if (pixelData == nullptr) {
         exitWithMessage("Pixel data must not be nullptr for Image creation.");
     }
-
-    if (channels != 4) {
-        exitWithMessage("Unsupported number of channels: {}", std::to_string(channels));
+    if (channels != 4 || width <= 0 || height <= 0) {
+        exitWithMessage("Unsupported image data: {}x{}, {} channels", width, height, channels);
     }
 
-    // Determine format based on sRGB flag
-    VkFormat format = sRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    const VkFormat format = sRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    const uint32_t mipLevels =
+        1u + static_cast<uint32_t>(std::floor(std::log2(std::max(width, height))));
 
-    // Create Vulkan image
+    // Generate a compact box-filtered mip chain on the CPU. This costs only during loading and
+    // avoids sampling the full 256px level for distant Bistro surfaces.
+    vector<vector<unsigned char>> mipData(mipLevels);
+    mipData[0].assign(pixelData, pixelData + static_cast<size_t>(width) * height * channels);
+
+    int previousWidth = width;
+    int previousHeight = height;
+    for (uint32_t level = 1; level < mipLevels; ++level) {
+        const int levelWidth = std::max(1, previousWidth / 2);
+        const int levelHeight = std::max(1, previousHeight / 2);
+        mipData[level].resize(static_cast<size_t>(levelWidth) * levelHeight * channels);
+
+        const auto& previous = mipData[level - 1];
+        auto& current = mipData[level];
+        for (int y = 0; y < levelHeight; ++y) {
+            for (int x = 0; x < levelWidth; ++x) {
+                for (int channel = 0; channel < channels; ++channel) {
+                    uint32_t sum = 0;
+                    uint32_t sampleCount = 0;
+                    for (int oy = 0; oy < 2; ++oy) {
+                        const int sourceY = std::min(previousHeight - 1, y * 2 + oy);
+                        for (int ox = 0; ox < 2; ++ox) {
+                            const int sourceX = std::min(previousWidth - 1, x * 2 + ox);
+                            sum += previous[(static_cast<size_t>(sourceY) * previousWidth +
+                                             sourceX) *
+                                                channels +
+                                            channel];
+                            ++sampleCount;
+                        }
+                    }
+                    current[(static_cast<size_t>(y) * levelWidth + x) * channels + channel] =
+                        static_cast<unsigned char>(sum / sampleCount);
+                }
+            }
+        }
+
+        previousWidth = levelWidth;
+        previousHeight = levelHeight;
+    }
+
+    vector<unsigned char> uploadData;
+    vector<VkBufferImageCopy> copyRegions;
+    copyRegions.reserve(mipLevels);
+
+    size_t totalSize = 0;
+    for (const auto& level : mipData) {
+        totalSize += level.size();
+    }
+    uploadData.reserve(totalSize);
+
+    VkDeviceSize offset = 0;
+    uint32_t levelWidth = static_cast<uint32_t>(width);
+    uint32_t levelHeight = static_cast<uint32_t>(height);
+    for (uint32_t level = 0; level < mipLevels; ++level) {
+        VkBufferImageCopy region{};
+        region.bufferOffset = offset;
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.mipLevel = level;
+        region.imageSubresource.layerCount = 1;
+        region.imageExtent = {levelWidth, levelHeight, 1};
+        copyRegions.push_back(region);
+
+        uploadData.insert(uploadData.end(), mipData[level].begin(), mipData[level].end());
+        offset += mipData[level].size();
+        levelWidth = std::max(1u, levelWidth / 2);
+        levelHeight = std::max(1u, levelHeight / 2);
+    }
+
     createImage(format, static_cast<uint32_t>(width), static_cast<uint32_t>(height),
                 VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, 0, VK_IMAGE_VIEW_TYPE_2D);
-
-    VkDeviceSize uploadSize = width * height * channels * sizeof(unsigned char);
+                VK_IMAGE_ASPECT_COLOR_BIT, mipLevels, 1, 0, VK_IMAGE_VIEW_TYPE_2D);
 
     MappedBuffer stagingBuffer(ctx_);
-    stagingBuffer.createStagingBuffer(uploadSize, pixelData);
+    stagingBuffer.createStagingBuffer(uploadData.size(), uploadData.data());
 
-    // Create command buffer for the copy operation
     CommandBuffer copyCmd = ctx_.createTransferCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
-
-    // Transition image layout to transfer destination optimal
     barrierHelper().transitionTo(copyCmd.handle(), VK_ACCESS_2_TRANSFER_WRITE_BIT,
                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                  VK_PIPELINE_STAGE_2_TRANSFER_BIT);
 
-    // Copy data from staging buffer to GPU image
-    VkBufferImageCopy bufferCopyRegion = {};
-    bufferCopyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    bufferCopyRegion.imageSubresource.layerCount = 1;
-    bufferCopyRegion.imageExtent.width = width;
-    bufferCopyRegion.imageExtent.height = height;
-    bufferCopyRegion.imageExtent.depth = 1;
-
     vkCmdCopyBufferToImage(copyCmd.handle(), stagingBuffer.buffer(), image_,
-                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &bufferCopyRegion);
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           static_cast<uint32_t>(copyRegions.size()), copyRegions.data());
 
     barrierHelper().transitionTo(copyCmd.handle(), VK_ACCESS_2_SHADER_READ_BIT,
                                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                                  VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
-
     copyCmd.submitAndWait();
 }
 
