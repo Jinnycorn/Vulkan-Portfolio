@@ -102,9 +102,15 @@ Renderer::Renderer(Context& ctx, ShaderManager& shaderManager, const uint32_t& k
     const char* lowSpecValue = std::getenv("HLAB_LOW_SPEC");
     const bool lowSpecMode = lowSpecValue != nullptr && string(lowSpecValue) != "0";
     if (lowSpecMode) {
+        // Start safely on 2 GB GPUs. The Quality tab can enable features incrementally.
+        optionsUBO_.shadowOn = 0;
         ssaoOptionsUBO_.ssaoSampleCount = 4;
         ssaoOptionsUBO_.ssaoRadius = 0.075f;
-        printLog("Low-spec renderer preset enabled");
+        postOptionsUBO_.toneMappingType = 1;
+        postOptionsUBO_.chromaticAberration = 0.0f;
+        postOptionsUBO_.vignetteStrength = 0.0f;
+        postOptionsUBO_.filmGrainStrength = 0.0f;
+        printLog("Low-spec renderer preset enabled (Optimized quality level)");
     }
 
     {
