@@ -12,14 +12,34 @@ option(HLAB_BASIC_ONLY "Build only the minimal Vulkan context smoke test" OFF)
 if(HLAB_BASIC_ONLY)
     find_package(Vulkan REQUIRED)
 
+    include(FetchContent)
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        glfw
+        GIT_REPOSITORY https://github.com/glfw/glfw.git
+        GIT_TAG 3.4
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(glfw)
+
     add_executable(Basic_Context
         examples/Basic_Context/Basic_Context.cpp
     )
     target_link_libraries(Basic_Context PRIVATE Vulkan::Vulkan)
     target_compile_features(Basic_Context PRIVATE cxx_std_20)
 
+    add_executable(Basic_Window
+        examples/Basic_Window/Basic_Window.cpp
+    )
+    target_link_libraries(Basic_Window PRIVATE Vulkan::Vulkan glfw)
+    target_compile_features(Basic_Window PRIVATE cxx_std_20)
+
     if(MSVC)
         target_compile_options(Basic_Context PRIVATE /W4 /permissive-)
+        target_compile_options(Basic_Window PRIVATE /W4 /permissive-)
     endif()
 
     return()
