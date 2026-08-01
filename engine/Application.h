@@ -222,6 +222,7 @@ class Application
 
     MouseState mouseState_;
     Camera camera_;
+    bool showUi_{true};
 
     vector<CommandBuffer> commandBuffers_{};
 
