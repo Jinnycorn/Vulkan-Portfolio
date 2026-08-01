@@ -152,6 +152,17 @@ Expand-Archive -Path (Join-Path $bistroDownloads "Exterior.zip") -DestinationPat
 foreach ($set in $multipartSets) {
     $firstPart = Join-Path $bistroDownloads "$($set.Name).7z.001"
     $outputDir = Join-Path $bistroModelRoot "LowRes\$($set.Name)"
+    $legacyOutputDir = Join-Path $modelsRoot $set.Name
+
+    # Versions before this fix extracted textures beside the Bistro directory.
+    # Move those completed folders into the layout referenced by exterior.mtl.
+    if ((Test-Path $legacyOutputDir) -and -not (Test-Path $outputDir)) {
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $outputDir) | Out-Null
+        Write-Host "Moving existing $($set.Name) into the Bistro LowRes directory ..."
+        Move-Item -Path $legacyOutputDir -Destination $outputDir
+        continue
+    }
+
     New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
     Write-Host "Extracting $($set.Name) ..."
     & $sevenZip x $firstPart "-o$outputDir" -y
