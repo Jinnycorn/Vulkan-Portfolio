@@ -567,11 +567,14 @@ void Renderer::createTextures(uint32_t swapchainWidth, uint32_t swapchainHeight)
             disableIblValue != nullptr && string(disableIblValue) != "0";
 
         if (useMinimalIbl) {
-            printLog("Ultra-low-memory mode: using 1x1 fallback IBL textures");
-            uint8_t neutralEnvironment[4] = {128, 128, 128, 255};
+            printLog("Ultra-low-memory mode: using blue-sky fallback IBL textures");
+            // Keep the fallback tiny for 2 GB GPUs, but use separate colors for the visible
+            // sky and diffuse ambient light. A shared neutral gray made the whole scene dull.
+            uint8_t skyEnvironment[4] = {65, 125, 205, 255};
+            uint8_t ambientEnvironment[4] = {110, 130, 160, 255};
             uint8_t neutralBrdf[4] = {255, 255, 255, 255};
-            imageBuffers_["prefilteredMap"]->createSolidCubemap(neutralEnvironment);
-            imageBuffers_["irradianceMap"]->createSolidCubemap(neutralEnvironment);
+            imageBuffers_["prefilteredMap"]->createSolidCubemap(skyEnvironment);
+            imageBuffers_["irradianceMap"]->createSolidCubemap(ambientEnvironment);
             imageBuffers_["brdfLut"]->createSolid(1, 1, neutralBrdf);
         } else {
             // Load prefiltered environment map (cubemap for specular reflections)
