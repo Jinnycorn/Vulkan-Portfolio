@@ -51,10 +51,9 @@ function Download-File {
 }
 
 Write-Host "Preparing the Khronos IBL environment ..."
+# PowerShell scripts do not set $LASTEXITCODE. With ErrorActionPreference
+# set to Stop, any setup failure is propagated directly by the child script.
 & (Join-Path $repoRoot "setup-engine-assets.ps1")
-if ($LASTEXITCODE -ne 0) {
-    throw "IBL asset setup failed."
-}
 
 Write-Host ""
 Write-Host "Downloading Khronos Damaged Helmet ..."
