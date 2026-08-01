@@ -2,6 +2,7 @@
 #include "Logger.h"
 #include "TracyProfiler.h" // Add Tracy macros wrapper
 #include <stb_image.h>
+#include <cstdlib>
 
 namespace hlab {
 
@@ -551,17 +552,32 @@ void Renderer::createTextures(uint32_t swapchainWidth, uint32_t swapchainHeight)
         printLog("  Irradiance: {}", path + "diffuseLambertian.ktx2");
         printLog("  BRDF LUT: {}", path + "outputLUT.png");
 
-        // Load prefiltered environment map (cubemap for specular reflections)
-        imageBuffers_["prefilteredMap"]->createTextureFromKtx2(path + "specularGGX.ktx2", true);
+        const char* disableIblValue = std::getenv("HLAB_DISABLE_IBL");
+        const bool useMinimalIbl =
+            disableIblValue != nullptr && string(disableIblValue) != "0";
+
+        if (useMinimalIbl) {
+            printLog("Ultra-low-memory mode: using 1x1 fallback IBL textures");
+            uint8_t neutralEnvironment[4] = {128, 128, 128, 255};
+            uint8_t neutralBrdf[4] = {255, 255, 255, 255};
+            imageBuffers_["prefilteredMap"]->createSolidCubemap(neutralEnvironment);
+            imageBuffers_["irradianceMap"]->createSolidCubemap(neutralEnvironment);
+            imageBuffers_["brdfLut"]->createSolid(1, 1, neutralBrdf);
+        } else {
+            // Load prefiltered environment map (cubemap for specular reflections)
+            imageBuffers_["prefilteredMap"]->createTextureFromKtx2(path + "specularGGX.ktx2",
+                                                                  true);
+
+            // Load irradiance map (cubemap for diffuse lighting)
+            imageBuffers_["irradianceMap"]->createTextureFromKtx2(
+                path + "diffuseLambertian.ktx2", true);
+
+            // Load BRDF lookup table (2D texture)
+            imageBuffers_["brdfLut"]->createTextureFromImage(path + "outputLUT.png", false, false);
+        }
+
         imageBuffers_["prefilteredMap"]->setSampler(samplerLinearRepeat_.handle());
-
-        // Load irradiance map (cubemap for diffuse lighting)
-        imageBuffers_["irradianceMap"]->createTextureFromKtx2(path + "diffuseLambertian.ktx2",
-                                                              true);
         imageBuffers_["irradianceMap"]->setSampler(samplerLinearRepeat_.handle());
-
-        // Load BRDF lookup table (2D texture)
-        imageBuffers_["brdfLut"]->createTextureFromImage(path + "outputLUT.png", false, false);
         imageBuffers_["brdfLut"]->setSampler(samplerLinearClamp_.handle());
     }
 
