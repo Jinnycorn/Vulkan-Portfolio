@@ -36,12 +36,18 @@ function Download-File {
     }
 
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Destination) | Out-Null
+    $partial = "$Destination.part"
+    if ($Force) {
+        Remove-Item -Force -ErrorAction SilentlyContinue $Destination, $partial
+    }
+
     Write-Host "Downloading $(Split-Path -Leaf $Destination) ..."
-    & curl.exe -L --fail --retry 5 --retry-delay 3 --continue-at - --output $Destination $Url
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $Destination) -or
-        (Get-Item $Destination).Length -eq 0) {
+    & curl.exe -L --fail --retry 5 --retry-delay 3 --continue-at - --output $partial $Url
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $partial) -or
+        (Get-Item $partial).Length -eq 0) {
         throw "Download failed: $Url"
     }
+    Move-Item -Force $partial $Destination
 }
 
 Write-Host "Preparing the Khronos IBL environment ..."
@@ -72,7 +78,7 @@ $multipartSets = @(
     @{ Name = "PropTextures"; Count = 7 }
 )
 foreach ($set in $multipartSets) {
-    for ($part = 1; $part -le $set.Count; ++$part) {
+    for ($part = 1; $part -le $set["Count"]; ++$part) {
         $suffix = $part.ToString("000")
         $name = "$($set.Name).7z.$suffix"
         Download-File -Url "$bistroBase/$name" -Destination (Join-Path $bistroDownloads $name)
