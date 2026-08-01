@@ -118,6 +118,7 @@ struct CullingStats
 {
     uint32_t totalMeshes = 0;
     uint32_t culledMeshes = 0;
+    uint32_t occlusionCulledMeshes = 0;
     uint32_t renderedMeshes = 0;
 };
 
@@ -129,7 +130,7 @@ class Renderer
              vector<unique_ptr<Model>>& models, VkFormat outColorFormat, VkFormat depthFormat,
              uint32_t swapChainWidth, uint32_t swapChainHeight);
 
-    ~Renderer() = default;
+    ~Renderer();
 
     void createPipelines(const VkFormat colorFormat, const VkFormat depthFormat);
     void createTextures(uint32_t swapchainWidth, uint32_t swapchainHeight);
@@ -147,6 +148,10 @@ class Renderer
     void updateWorldBounds(vector<unique_ptr<Model>>& models);
     void setFrustumCullingEnabled(bool enabled);
     void updateViewFrustum(const glm::mat4& viewProjection);
+
+    // Temporal GPU occlusion culling
+    bool isOcclusionCullingEnabled() const;
+    void setOcclusionCullingEnabled(bool enabled);
 
     auto sceneUBO() -> SceneUniform&
     {
@@ -250,6 +255,18 @@ class Renderer
 
     ViewFrustum viewFrustum_{};
     bool frustumCullingEnabled_{true};
+
+    VkQueryPool occlusionQueryPool_{VK_NULL_HANDLE};
+    uint32_t meshQueryCount_{0};
+    vector<uint8_t> occlusionVisible_{};
+    vector<uint8_t> occlusionMissCounts_{};
+    vector<vector<uint8_t>> occlusionQueryIssued_{};
+    bool occlusionCullingEnabled_{true};
+    uint64_t renderFrameCounter_{0};
+    static constexpr uint32_t kOcclusionRetestInterval = 8;
+
+    void createOcclusionResources(const vector<unique_ptr<Model>>& models);
+    void resolveOcclusionQueries(uint32_t currentFrame);
 
     // Statistics
     CullingStats cullingStats_;
