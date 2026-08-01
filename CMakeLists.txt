@@ -7,6 +7,12 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 
+# Source files contain Korean comments and strings encoded as UTF-8.
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
+
+
 # Fast, asset-free smoke test used by setup-basic.ps1.
 option(HLAB_BASIC_ONLY "Build only the minimal Vulkan context smoke test" OFF)
 if(HLAB_BASIC_ONLY)
