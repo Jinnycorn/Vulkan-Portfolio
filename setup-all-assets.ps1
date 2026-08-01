@@ -149,23 +149,39 @@ Write-Host ""
 Write-Host "Extracting Bistro geometry ..."
 Expand-Archive -Path (Join-Path $bistroDownloads "Exterior.zip") -DestinationPath $bistroModelRoot -Force
 
+$lowResRoot = Join-Path $bistroModelRoot "LowRes"
+New-Item -ItemType Directory -Force -Path $lowResRoot | Out-Null
+
 foreach ($set in $multipartSets) {
     $firstPart = Join-Path $bistroDownloads "$($set.Name).7z.001"
-    $outputDir = Join-Path $bistroModelRoot "LowRes\$($set.Name)"
+    $outputDir = Join-Path $lowResRoot $set.Name
     $legacyOutputDir = Join-Path $modelsRoot $set.Name
 
-    # Versions before this fix extracted textures beside the Bistro directory.
-    # Move those completed folders into the layout referenced by exterior.mtl.
+    # Versions before this fix extracted each archive outside the Bistro tree.
     if ((Test-Path $legacyOutputDir) -and -not (Test-Path $outputDir)) {
-        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $outputDir) | Out-Null
         Write-Host "Moving existing $($set.Name) into the Bistro LowRes directory ..."
         Move-Item -Path $legacyOutputDir -Destination $outputDir
+    }
+
+    # The archives already contain their own named top-level directory. Older
+    # setup versions therefore produced BuildingTextures\BuildingTextures, etc.
+    $nestedOutputDir = Join-Path $outputDir $set.Name
+    if (Test-Path $nestedOutputDir) {
+        Write-Host "Flattening nested $($set.Name) directory ..."
+        Get-ChildItem -Path $nestedOutputDir -Force |
+            Move-Item -Destination $outputDir -Force
+        Remove-Item -Path $nestedOutputDir -Force
+    }
+
+    $existingFile = Get-ChildItem -Path $outputDir -File -Recurse -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($existingFile) {
+        Write-Host "Already extracted: $($set.Name)"
         continue
     }
 
-    New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
     Write-Host "Extracting $($set.Name) ..."
-    & $sevenZip x $firstPart "-o$outputDir" -y
+    & $sevenZip x $firstPart "-o$lowResRoot" -y
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to extract $($set.Name)."
     }
@@ -197,7 +213,7 @@ $requiredFiles = @(
     (Join-Path $charactersRoot "Leonard.fbx"),
     (Join-Path $charactersRoot "Bboy Hip Hop Move.fbx"),
     (Join-Path $bistroModelRoot "exterior.obj"),
-    (Join-Path $bistroModelRoot "LowRes\BuildingTextures"),
+    (Join-Path $bistroModelRoot "LowRes\BuildingTextures\Paris_Curbstones_01_diff.png"),
     (Join-Path $bistroModelRoot "LowRes\OtherTextures"),
     (Join-Path $bistroModelRoot "LowRes\PropTextures")
 )
