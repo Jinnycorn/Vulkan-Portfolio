@@ -99,6 +99,14 @@ Renderer::Renderer(Context& ctx, ShaderManager& shaderManager, const uint32_t& k
 
     createOcclusionResources(models);
 
+    const char* lowSpecValue = std::getenv("HLAB_LOW_SPEC");
+    const bool lowSpecMode = lowSpecValue != nullptr && string(lowSpecValue) != "0";
+    if (lowSpecMode) {
+        ssaoOptionsUBO_.ssaoSampleCount = 4;
+        ssaoOptionsUBO_.ssaoRadius = 0.075f;
+        printLog("Low-spec renderer preset enabled");
+    }
+
     {
         TRACY_CPU_SCOPE("Create Pipelines");
         createPipelines(outColorFormat, depthFormat);
@@ -370,6 +378,10 @@ void Renderer::draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swap
 
     for (auto& renderNode : renderGraph_.renderNodes_) {
 
+        if (renderNode.pipelineNames[0] == "shadowMap" && optionsUBO_.shadowOn == 0) {
+            continue;
+        }
+
         if (renderNode.pipelineNames[0] == "deferredLighting") {
             TRACY_CPU_SCOPE("deferredLighting");
             pipelines_.at("deferredLighting")->dispatch(cmd, currentFrame); // Compute
@@ -629,7 +641,7 @@ void Renderer::createPipelines(const VkFormat swapChainColorFormat, const VkForm
         pipelines_["pbrDeferred"] = std::make_unique<Pipeline>(
             ctx_, shaderManager_, PipelineConfig::createPbrDeferred(),
             vector<VkFormat>{VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R16G16B16A16_SFLOAT,
-                             VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_R8G8B8A8_UNORM},
+                             VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R8G8B8A8_UNORM},
             depthFormat, VK_SAMPLE_COUNT_1_BIT);
 
         pipelines_["sky"] = std::make_unique<Pipeline>(ctx_, shaderManager_, PipelineConfig::createSky(),
@@ -662,6 +674,18 @@ void Renderer::createPipelines(const VkFormat swapChainColorFormat, const VkForm
 void Renderer::createTextures(uint32_t swapchainWidth, uint32_t swapchainHeight)
 {
     TRACY_CPU_SCOPE("Renderer::createTextures");
+
+    const char* lowSpecValue = std::getenv("HLAB_LOW_SPEC");
+    const bool lowSpecMode = lowSpecValue != nullptr && string(lowSpecValue) != "0";
+    if (lowSpecMode) {
+        constexpr float kInternalRenderScale = 0.75f;
+        swapchainWidth =
+            std::max(1u, static_cast<uint32_t>(float(swapchainWidth) * kInternalRenderScale));
+        swapchainHeight =
+            std::max(1u, static_cast<uint32_t>(float(swapchainHeight) * kInternalRenderScale));
+        printLog("Internal render resolution: {}x{} (75% scale)", swapchainWidth,
+                 swapchainHeight);
+    }
 
     {
         TRACY_CPU_SCOPE("createSamplers");
@@ -759,7 +783,7 @@ void Renderer::createTextures(uint32_t swapchainWidth, uint32_t swapchainHeight)
         VkFormat normalFormat =
             VK_FORMAT_R16G16B16A16_SFLOAT; // Normal + Roughness (8 bytes, needs precision)
         VkFormat positionFormat =
-            VK_FORMAT_R32G32B32A32_SFLOAT; // Position + Depth (16 bytes, needs high precision)
+            VK_FORMAT_R16G16B16A16_SFLOAT; // Position + Depth (8 bytes, adequate for this scene)
         VkFormat materialFormat = VK_FORMAT_R8G8B8A8_UNORM; // AO + Emissive + Material ID (4 bytes)
 
         printLog("  gAlbedo: {} ({} bytes/pixel)", vkFormatToString(albedoFormat),
@@ -810,7 +834,8 @@ void Renderer::createTextures(uint32_t swapchainWidth, uint32_t swapchainHeight)
         imageBuffers_["depthStencil"]->createDepthBuffer(swapchainWidth, swapchainHeight);
 
         // Create shadow map
-        uint32_t shadowMapSize = 2048 * 2;
+        const uint32_t shadowMapSize = lowSpecMode ? 1024u : 4096u;
+        printLog("Shadow map resolution: {}x{}", shadowMapSize, shadowMapSize);
         imageBuffers_["shadowMap"]->createShadow(shadowMapSize, shadowMapSize);
         imageBuffers_["shadowMap"]->setSampler(samplerShadow_.handle());
     }
@@ -1025,10 +1050,27 @@ void Renderer::updateWorldBounds(vector<unique_ptr<Model>>& models)
 {
     TRACY_CPU_SCOPE("Renderer::updateWorldBounds");
 
-    for (auto& model : models) {
-        for (auto& mesh : model->meshes()) {
-            mesh.updateWorldBounds(model->modelMatrix());
+    if (cachedModelMatrices_.size() != models.size()) {
+        cachedModelMatrices_.assign(models.size(), glm::mat4(1.0f));
+        worldBoundsValid_.assign(models.size(), uint8_t{0});
+    }
+
+    for (size_t modelIndex = 0; modelIndex < models.size(); ++modelIndex) {
+        auto& model = models[modelIndex];
+        const glm::mat4& modelMatrix = model->modelMatrix();
+
+        // Bistro is static in normal use. Recompute thousands of AABBs only when its transform
+        // actually changes through the UI.
+        if (worldBoundsValid_[modelIndex] && cachedModelMatrices_[modelIndex] == modelMatrix) {
+            continue;
         }
+
+        for (auto& mesh : model->meshes()) {
+            mesh.updateWorldBounds(modelMatrix);
+        }
+
+        cachedModelMatrices_[modelIndex] = modelMatrix;
+        worldBoundsValid_[modelIndex] = 1;
     }
 }
 
