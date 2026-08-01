@@ -45,11 +45,21 @@ function Install-WingetPackage {
 
     Write-Host "Installing $Id ..."
     & winget @arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "winget failed to install $Id (exit code $LASTEXITCODE)."
-    }
+    $installExitCode = $LASTEXITCODE
     Refresh-Path
+
+    if ($installExitCode -ne 0) {
+        & winget list --id $Id --exact --accept-source-agreements | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "winget failed to install $Id (exit code $installExitCode)."
+        }
+        Write-Host "$Id is already installed."
+    }
 }
+
+# A child PowerShell process can inherit the PATH from before winget installed a package.
+# Reload the registered machine/user PATH before checking prerequisites.
+Refresh-Path
 
 if (-not (Get-Command cmake -ErrorAction SilentlyContinue)) {
     Install-WingetPackage -Id "Kitware.CMake"
