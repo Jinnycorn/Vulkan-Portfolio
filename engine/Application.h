@@ -261,6 +261,7 @@ class Application
     // FPS calculation method
     void updatePerformanceMetrics(float deltaTime);
 
+    void renderQualityControlPanel();
     void renderHDRControlWindow();
     void renderPostProcessingControlWindow();
     void renderCameraControlWindow();
