@@ -180,6 +180,14 @@ void Application::setupCallbacks()
                     printLog("Frustum culling: {}", !cullingEnabled ? "Enabled" : "Disabled");
                 }
                 break;
+            case GLFW_KEY_F5:
+                // Toggle temporal GPU occlusion culling
+                {
+                    bool cullingEnabled = app->renderer_->isOcclusionCullingEnabled();
+                    app->renderer_->setOcclusionCullingEnabled(!cullingEnabled);
+                    printLog("Occlusion culling: {}", !cullingEnabled ? "Enabled" : "Disabled");
+                }
+                break;
             case GLFW_KEY_ESCAPE:
                 glfwSetWindowShouldClose(window, GLFW_TRUE);
                 break;
@@ -870,25 +878,33 @@ void Application::updateGui()
         renderer_->optionsUBO().shadowOffset = 0.01f;
     }
 
-    // Frustum Culling Controls
+    // Geometry Culling Controls
     bool frustumCullingEnabled = renderer_->isFrustumCullingEnabled();
     if (ImGui::Checkbox("Frustum Culling", &frustumCullingEnabled)) {
         renderer_->setFrustumCullingEnabled(frustumCullingEnabled);
     }
 
-    // Display culling statistics
-    if (renderer_->isFrustumCullingEnabled()) {
-        const auto& stats = renderer_->getCullingStats();
-        ImGui::Text("Culling Stats:");
-        ImGui::Text("  Total Meshes: %u", stats.totalMeshes);
-        ImGui::Text("  Rendered: %u", stats.renderedMeshes);
-        ImGui::Text("  Culled: %u", stats.culledMeshes);
+    bool occlusionCullingEnabled = renderer_->isOcclusionCullingEnabled();
+    if (ImGui::Checkbox("GPU Occlusion Culling", &occlusionCullingEnabled)) {
+        renderer_->setOcclusionCullingEnabled(occlusionCullingEnabled);
+    }
 
-        if (stats.totalMeshes > 0) {
-            float cullingPercentage =
-                (float(stats.culledMeshes) / float(stats.totalMeshes)) * 100.0f;
-            ImGui::Text("  Culled: %.1f%%", cullingPercentage);
-        }
+    // Back-face culling is baked into the PBR and shadow pipelines.
+    ImGui::TextDisabled("Back-face Culling: Enabled");
+
+    const auto& stats = renderer_->getCullingStats();
+    ImGui::Text("Culling Stats:");
+    ImGui::Text("  Total Meshes: %u", stats.totalMeshes);
+    ImGui::Text("  Frustum Culled: %u", stats.culledMeshes);
+    ImGui::Text("  Occlusion Culled: %u", stats.occlusionCulledMeshes);
+    ImGui::Text("  Frustum Visible: %u", stats.renderedMeshes);
+
+    if (stats.totalMeshes > 0) {
+        const uint32_t totalCulled =
+            std::min(stats.totalMeshes, stats.culledMeshes + stats.occlusionCulledMeshes);
+        float cullingPercentage =
+            (float(totalCulled) / float(stats.totalMeshes)) * 100.0f;
+        ImGui::Text("  Total Culled: %.1f%%", cullingPercentage);
     }
 
     ImGui::Separator();
@@ -1543,6 +1559,7 @@ void Application::renderCameraControlWindow()
         ImGui::BulletText("F2: Toggle camera mode");
         ImGui::BulletText("F3: Print camera info to console");
         ImGui::BulletText("F4: Toggle frustum culling");
+        ImGui::BulletText("F5: Toggle GPU occlusion culling");
     }
 
     ImGui::End();
