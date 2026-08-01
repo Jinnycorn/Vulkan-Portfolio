@@ -472,7 +472,17 @@ void Renderer::createPipelines(const VkFormat swapChainColorFormat, const VkForm
 
     {
         TRACY_CPU_SCOPE("Read Render Graph");
-        renderGraph_.readFromFile("RenderGraph.json");
+        if (!renderGraph_.readFromFile("RenderGraph.json")) {
+            printLog("RenderGraph.json not found; using built-in deferred render graph");
+
+            renderGraph_.addRenderNode({{"shadowMap"}, {}, "shadowMap", ""});
+            renderGraph_.addRenderNode(
+                {{"pbrDeferred"}, {"gAlbedo", "gNormal", "gPosition", "gMaterial"},
+                 "depthStencil", ""});
+            renderGraph_.addRenderNode({{"sky"}, {"floatColor1"}, "depthStencil", ""});
+            renderGraph_.addRenderNode({{"deferredLighting"}, {}, "", ""});
+            renderGraph_.addRenderNode({{"post"}, {"swapchain"}, "", ""});
+        }
     }
 
     // Select optimal HDR format with proper priority (float formats first)
