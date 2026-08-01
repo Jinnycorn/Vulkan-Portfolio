@@ -6,7 +6,7 @@
 #include <ktx.h>
 #include <ktxvulkan.h>
 #include <stb_image.h>
-#include <filesystem>
+#include <filesystem>\n#include <cmath>\n#include <vector>
 
 // STB implementation - define once per library
 #define STB_IMAGE_IMPLEMENTATION
@@ -256,7 +256,8 @@ void Image2D::createTextureFromKtx2(string filename, bool isCubemap)
     ktxTexture_Destroy(ktxTexture(ktxTexture2));
 }
 
-void Image2D::createTextureFromImage(string filename, bool isCubemap, bool sRGB)
+void Image2D::createTextureFromImage(string filename, bool isCubemap, bool sRGB,
+                                           uint32_t maxTextureDimension)
 {
     filename = fixPath(filename);
 
@@ -285,7 +286,56 @@ void Image2D::createTextureFromImage(string filename, bool isCubemap, bool sRGB)
                         string(stbi_failure_reason()));
     }
 
-    createFromPixelData(pixelData, width, height, 4, sRGB);
+    int uploadWidth = width;
+    int uploadHeight = height;
+    unsigned char* uploadPixels = pixelData;
+    vector<unsigned char> resizedPixels;
+
+    if (maxTextureDimension > 0 &&
+        (width > static_cast<int>(maxTextureDimension) ||
+         height > static_cast<int>(maxTextureDimension))) {
+        const float scale =
+            std::min(static_cast<float>(maxTextureDimension) / static_cast<float>(width),
+                     static_cast<float>(maxTextureDimension) / static_cast<float>(height));
+        uploadWidth = std::max(1, static_cast<int>(std::round(width * scale)));
+        uploadHeight = std::max(1, static_cast<int>(std::round(height * scale)));
+        resizedPixels.resize(static_cast<size_t>(uploadWidth) * uploadHeight * 4);
+
+        // Bilinear CPU resize keeps the low-VRAM path independent of optional image tools.
+        for (int y = 0; y < uploadHeight; ++y) {
+            float sourceY = (static_cast<float>(y) + 0.5f) * height / uploadHeight - 0.5f;
+            sourceY = std::clamp(sourceY, 0.0f, static_cast<float>(height - 1));
+            const int y0 = static_cast<int>(std::floor(sourceY));
+            const int y1 = std::min(y0 + 1, height - 1);
+            const float fy = sourceY - y0;
+
+            for (int x = 0; x < uploadWidth; ++x) {
+                float sourceX = (static_cast<float>(x) + 0.5f) * width / uploadWidth - 0.5f;
+                sourceX = std::clamp(sourceX, 0.0f, static_cast<float>(width - 1));
+                const int x0 = static_cast<int>(std::floor(sourceX));
+                const int x1 = std::min(x0 + 1, width - 1);
+                const float fx = sourceX - x0;
+
+                for (int channel = 0; channel < 4; ++channel) {
+                    const float top =
+                        pixelData[(y0 * width + x0) * 4 + channel] * (1.0f - fx) +
+                        pixelData[(y0 * width + x1) * 4 + channel] * fx;
+                    const float bottom =
+                        pixelData[(y1 * width + x0) * 4 + channel] * (1.0f - fx) +
+                        pixelData[(y1 * width + x1) * 4 + channel] * fx;
+                    const float value = top * (1.0f - fy) + bottom * fy;
+                    resizedPixels[(y * uploadWidth + x) * 4 + channel] =
+                        static_cast<unsigned char>(std::clamp(value, 0.0f, 255.0f) + 0.5f);
+                }
+            }
+        }
+
+        uploadPixels = resizedPixels.data();
+        printLog("Downscaled texture for low-VRAM GPU: {} ({}x{} -> {}x{})", filename, width,
+                 height, uploadWidth, uploadHeight);
+    }
+
+    createFromPixelData(uploadPixels, uploadWidth, uploadHeight, 4, sRGB);
     stbi_image_free(pixelData);
 }
 
