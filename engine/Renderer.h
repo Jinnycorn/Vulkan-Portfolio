@@ -255,6 +255,8 @@ class Renderer
 
     ViewFrustum viewFrustum_{};
     bool frustumCullingEnabled_{true};
+    vector<glm::mat4> cachedModelMatrices_{};
+    vector<uint8_t> worldBoundsValid_{};
 
     VkQueryPool occlusionQueryPool_{VK_NULL_HANDLE};
     uint32_t meshQueryCount_{0};
