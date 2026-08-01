@@ -261,6 +261,7 @@ class Renderer
     vector<uint8_t> occlusionVisible_{};
     vector<uint8_t> occlusionMissCounts_{};
     vector<vector<uint8_t>> occlusionQueryIssued_{};
+    vector<uint64_t> occlusionQueryResults_{};
     bool occlusionCullingEnabled_{true};
     uint64_t renderFrameCounter_{0};
     static constexpr uint32_t kOcclusionRetestInterval = 8;
