@@ -34,6 +34,8 @@ void Renderer::createOcclusionResources(const vector<unique_ptr<Model>>& models)
     occlusionVisible_.assign(meshQueryCount_, 1);
     occlusionMissCounts_.assign(meshQueryCount_, 0);
     occlusionQueryIssued_.assign(kMaxFramesInFlight_, vector<uint8_t>(meshQueryCount_, 0));
+    // Each query returns {passed sample count, availability}.
+    occlusionQueryResults_.assign(static_cast<size_t>(meshQueryCount_) * 2, 0);
 
     printLog("GPU occlusion culling initialized for {} meshes", meshQueryCount_);
 }
@@ -46,17 +48,26 @@ void Renderer::resolveOcclusionQueries(uint32_t currentFrame)
     }
 
     const uint32_t queryBase = currentFrame * meshQueryCount_;
+    std::fill(occlusionQueryResults_.begin(), occlusionQueryResults_.end(), uint64_t{0});
+
+    // Fetch the entire frame range in one driver call. Availability keeps untouched queries safe.
+    VkResult result = vkGetQueryPoolResults(
+        ctx_.device(), occlusionQueryPool_, queryBase, meshQueryCount_,
+        occlusionQueryResults_.size() * sizeof(uint64_t), occlusionQueryResults_.data(),
+        2 * sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+
+    if (result != VK_SUCCESS && result != VK_NOT_READY) {
+        return;
+    }
+
     for (uint32_t i = 0; i < meshQueryCount_; ++i) {
         if (!occlusionQueryIssued_[currentFrame][i]) {
             continue;
         }
 
-        uint64_t passedSamples = 0;
-        VkResult result = vkGetQueryPoolResults(
-            ctx_.device(), occlusionQueryPool_, queryBase + i, 1, sizeof(passedSamples),
-            &passedSamples, sizeof(passedSamples), VK_QUERY_RESULT_64_BIT);
-
-        if (result != VK_SUCCESS) {
+        const uint64_t passedSamples = occlusionQueryResults_[static_cast<size_t>(i) * 2];
+        const uint64_t available = occlusionQueryResults_[static_cast<size_t>(i) * 2 + 1];
+        if (available == 0) {
             continue;
         }
 
