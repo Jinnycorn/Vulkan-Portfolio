@@ -74,7 +74,6 @@ $requirements = @{
         "assets\characters\Leonard\Leonard.fbx"
     )
     Ex14_Bistro = @(
-        "assets\characters\Leonard\Bboy Hip Hop Move.fbx",
         "assets\models\AmazonLumberyardBistroMorganMcGuire\exterior.obj",
         "assets\textures\golden_gate_hills_4k\specularGGX.ktx2",
         "assets\textures\golden_gate_hills_4k\diffuseLambertian.ktx2",
