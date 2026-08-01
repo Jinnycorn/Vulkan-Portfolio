@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <set>
 #include <unordered_map>
+#include <fstream>
 
 namespace hlab {
 
@@ -248,9 +249,36 @@ VkSampleCountFlagBits Context::getMaxUsableSampleCount()
 
 void Context::createPipelineCache()
 {
-    VkPipelineCacheCreateInfo pipelineCacheCreateInfo = {};
-    pipelineCacheCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-    check(vkCreatePipelineCache(device_, &pipelineCacheCreateInfo, nullptr, &pipelineCache_));
+    constexpr const char* kPipelineCacheFilename = "pipeline_cache.bin";
+    vector<char> initialData;
+
+    std::ifstream cacheFile(kPipelineCacheFilename, std::ios::binary | std::ios::ate);
+    if (cacheFile) {
+        const std::streamsize size = cacheFile.tellg();
+        if (size > 0) {
+            initialData.resize(static_cast<size_t>(size));
+            cacheFile.seekg(0, std::ios::beg);
+            cacheFile.read(initialData.data(), size);
+        }
+    }
+
+    VkPipelineCacheCreateInfo pipelineCacheCreateInfo{
+        VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
+    pipelineCacheCreateInfo.initialDataSize = initialData.size();
+    pipelineCacheCreateInfo.pInitialData = initialData.empty() ? nullptr : initialData.data();
+
+    VkResult result =
+        vkCreatePipelineCache(device_, &pipelineCacheCreateInfo, nullptr, &pipelineCache_);
+    if (result != VK_SUCCESS && !initialData.empty()) {
+        // Driver or GPU changed: discard the stale cache and create a clean one.
+        pipelineCacheCreateInfo.initialDataSize = 0;
+        pipelineCacheCreateInfo.pInitialData = nullptr;
+        check(vkCreatePipelineCache(device_, &pipelineCacheCreateInfo, nullptr, &pipelineCache_));
+    } else {
+        check(result);
+    }
+
+    printLog("Pipeline cache: {} bytes loaded", initialData.size());
 }
 
 void Context::createInstance(vector<const char*> requiredInstanceExtensions)
@@ -803,6 +831,21 @@ void Context::cleanup()
     }
 
     if (pipelineCache_ != VK_NULL_HANDLE) {
+        size_t cacheSize = 0;
+        if (vkGetPipelineCacheData(device_, pipelineCache_, &cacheSize, nullptr) == VK_SUCCESS &&
+            cacheSize > 0) {
+            vector<uint8_t> cacheData(cacheSize);
+            if (vkGetPipelineCacheData(device_, pipelineCache_, &cacheSize, cacheData.data()) ==
+                VK_SUCCESS) {
+                std::ofstream cacheFile("pipeline_cache.bin",
+                                        std::ios::binary | std::ios::trunc);
+                if (cacheFile) {
+                    cacheFile.write(reinterpret_cast<const char*>(cacheData.data()),
+                                    static_cast<std::streamsize>(cacheSize));
+                }
+            }
+        }
+
         vkDestroyPipelineCache(device_, pipelineCache_, nullptr);
         pipelineCache_ = VK_NULL_HANDLE;
     }
