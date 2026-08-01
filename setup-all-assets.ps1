@@ -84,15 +84,61 @@ foreach ($set in $multipartSets) {
     }
 }
 
-$sevenZip = Join-Path $env:ProgramFiles "7-Zip\7z.exe"
-if (-not (Test-Path $sevenZip)) {
+function Find-SevenZip {
+    $candidates = @()
+
+    if ($env:ProgramFiles) {
+        $candidates += Join-Path $env:ProgramFiles "7-Zip\7z.exe"
+    }
+    if (${env:ProgramFiles(x86)}) {
+        $candidates += Join-Path ${env:ProgramFiles(x86)} "7-Zip\7z.exe"
+    }
+    if ($env:LOCALAPPDATA) {
+        $candidates += Join-Path $env:LOCALAPPDATA "Programs\7-Zip\7z.exe"
+        $candidates += Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\7z.exe"
+    }
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return (Resolve-Path $candidate).Path
+        }
+    }
+
+    $command = Get-Command 7z.exe -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+
+    if ($env:LOCALAPPDATA) {
+        $packageRoot = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages"
+        if (Test-Path $packageRoot) {
+            $packageExe = Get-ChildItem -Path $packageRoot -Filter "7z.exe" -File -Recurse -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match "7zip\.7zip" } |
+                Select-Object -First 1
+            if ($packageExe) {
+                return $packageExe.FullName
+            }
+        }
+    }
+
+    return $null
+}
+
+$sevenZip = Find-SevenZip
+if (-not $sevenZip) {
     Write-Host "Installing 7-Zip ..."
     & winget install --id 7zip.7zip --exact --accept-package-agreements --accept-source-agreements --silent
-    $sevenZip = Join-Path $env:ProgramFiles "7-Zip\7z.exe"
+
+    # Some installers finish updating their files after winget returns.
+    for ($attempt = 0; $attempt -lt 10 -and -not $sevenZip; ++$attempt) {
+        Start-Sleep -Seconds 1
+        $sevenZip = Find-SevenZip
+    }
 }
-if (-not (Test-Path $sevenZip)) {
-    throw "7-Zip was not found after installation."
+if (-not $sevenZip) {
+    throw "7-Zip was installed but 7z.exe could not be located. Open a new PowerShell window and run this script again."
 }
+Write-Host "Using 7-Zip: $sevenZip"
 
 Write-Host ""
 Write-Host "Extracting Bistro geometry ..."
