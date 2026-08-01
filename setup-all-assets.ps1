@@ -87,6 +87,11 @@ foreach ($set in $multipartSets) {
 function Find-SevenZip {
     $candidates = @()
 
+    # A 32-bit PowerShell process maps ProgramFiles to Program Files (x86).
+    # ProgramW6432 always points at the native 64-bit Program Files directory.
+    if ($env:ProgramW6432) {
+        $candidates += Join-Path $env:ProgramW6432 "7-Zip\7z.exe"
+    }
     if ($env:ProgramFiles) {
         $candidates += Join-Path $env:ProgramFiles "7-Zip\7z.exe"
     }
