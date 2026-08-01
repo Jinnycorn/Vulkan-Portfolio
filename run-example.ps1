@@ -103,6 +103,10 @@ if (-not (Test-Path $exe)) {
 $previousLocation = Get-Location
 try {
     Set-Location $exeDir
+    if ($Example -eq "Ex14_Bistro") {
+        $env:HLAB_DISABLE_IBL = "1"
+        Write-Host "Ultra-low-memory mode enabled for Ex14_Bistro (256px materials, fallback IBL)."
+    }
     Write-Host "Running $Example on the selected Vulkan GPU ..."
     & $exe
     if ($LASTEXITCODE -ne 0) {
