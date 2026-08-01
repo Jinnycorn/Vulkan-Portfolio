@@ -708,6 +708,11 @@ void Application::updateGui()
     ImGui::Separator();
 
     if (ImGui::BeginTabBar("##InspectorTabs", ImGuiTabBarFlags_FittingPolicyScroll)) {
+        if (ImGui::BeginTabItem("Quality")) {
+            renderQualityControlPanel();
+            ImGui::EndTabItem();
+        }
+
         if (ImGui::BeginTabItem("Scene")) {
 
     // Enhanced performance display
@@ -1004,6 +1009,148 @@ void Application::updateGui()
 }
 
 // ADD: HDR Control window method (based on Ex10_Example)
+void Application::renderQualityControlPanel()
+{
+    static int qualityLevel = 0;
+
+    const char* names[] = {"Optimized", "Balanced", "High", "Showcase"};
+    const char* descriptions[] = {
+        "Maximum stability for MX110. Shadows and costly AA are disabled.",
+        "Enables 1024px shadows, 8-sample SSAO and fast FXAA.",
+        "Uses 16-sample SSAO, ACES tone mapping and balanced FXAA.",
+        "Best runtime quality: 32-sample SSAO and quality FXAA."
+    };
+
+    auto applyPreset = [&](int level) {
+        qualityLevel = level;
+        auto& options = renderer_->optionsUBO();
+        auto& ssao = renderer_->ssaoOptionsUBO();
+        auto& post = renderer_->postOptionsUBO();
+        auto& sky = renderer_->skyOptionsUBO();
+
+        // Expensive effects that are not part of the selected profile are reset.
+        post.padding1 = 0.0f;
+        post.filmGrainStrength = 0.0f;
+        post.debugMode = 0;
+
+        switch (level) {
+        case 0:
+            options.shadowOn = 0;
+            options.specularWeight = 0.04f;
+            options.diffuseWeight = 1.0f;
+            ssao.ssaoSampleCount = 4;
+            ssao.ssaoRadius = 0.075f;
+            ssao.ssaoPower = 1.5f;
+            post.toneMappingType = 1;
+            post.exposure = 1.0f;
+            post.contrast = 1.0f;
+            post.saturation = 1.0f;
+            post.chromaticAberration = 0.0f;
+            post.vignetteStrength = 0.0f;
+            sky.environmentIntensity = 1.0f;
+            break;
+        case 1:
+            options.shadowOn = 1;
+            options.specularWeight = 0.05f;
+            options.diffuseWeight = 1.0f;
+            ssao.ssaoSampleCount = 8;
+            ssao.ssaoRadius = 0.085f;
+            ssao.ssaoPower = 1.8f;
+            post.toneMappingType = 2;
+            post.exposure = 1.0f;
+            post.contrast = 1.0f;
+            post.saturation = 1.0f;
+            post.chromaticAberration = 1.25f;
+            post.vignetteStrength = 0.0f;
+            sky.environmentIntensity = 1.0f;
+            break;
+        case 2:
+            options.shadowOn = 1;
+            options.specularWeight = 0.06f;
+            options.diffuseWeight = 1.05f;
+            ssao.ssaoSampleCount = 16;
+            ssao.ssaoRadius = 0.10f;
+            ssao.ssaoPower = 2.0f;
+            post.toneMappingType = 2;
+            post.exposure = 1.05f;
+            post.contrast = 1.03f;
+            post.saturation = 1.04f;
+            post.chromaticAberration = 1.55f;
+            post.vignetteStrength = 0.04f;
+            sky.environmentIntensity = 1.1f;
+            break;
+        default:
+            options.shadowOn = 1;
+            options.specularWeight = 0.08f;
+            options.diffuseWeight = 1.1f;
+            ssao.ssaoSampleCount = 32;
+            ssao.ssaoRadius = 0.12f;
+            ssao.ssaoPower = 2.25f;
+            post.toneMappingType = 2;
+            post.exposure = 1.1f;
+            post.contrast = 1.06f;
+            post.saturation = 1.06f;
+            post.chromaticAberration = 1.79f;
+            post.vignetteStrength = 0.08f;
+            post.vignetteRadius = 0.9f;
+            sky.environmentIntensity = 1.2f;
+            break;
+        }
+    };
+
+    ImGui::Text("Runtime Quality Ladder");
+    ImGui::TextDisabled("Start low, then raise one step while watching FPS and GPU time.");
+    ImGui::Spacing();
+
+    for (int level = 0; level < 4; ++level) {
+        const bool selected = qualityLevel == level;
+        if (selected) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.35f, 0.60f, 1.0f));
+        }
+
+        const string label =
+            std::format("{:02d}  {}{}", level + 1, names[level], selected ? "  ACTIVE" : "");
+        if (ImGui::Button(label.c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 38.0f))) {
+            applyPreset(level);
+        }
+
+        if (selected) {
+            ImGui::PopStyleColor();
+        }
+        ImGui::TextDisabled("%s", descriptions[level]);
+        ImGui::Spacing();
+    }
+
+    ImGui::ProgressBar(float(qualityLevel + 1) / 4.0f, ImVec2(-1.0f, 6.0f), "");
+    ImGui::Spacing();
+    ImGui::Separator();
+
+    ImGui::Text("Live Fine Tuning");
+    bool shadows = renderer_->optionsUBO().shadowOn != 0;
+    if (ImGui::Checkbox("Shadows", &shadows)) {
+        renderer_->optionsUBO().shadowOn = shadows ? 1 : 0;
+    }
+
+    int ssaoSamples = renderer_->ssaoOptionsUBO().ssaoSampleCount;
+    if (ImGui::SliderInt("SSAO Samples", &ssaoSamples, 4, 32)) {
+        renderer_->ssaoOptionsUBO().ssaoSampleCount = ssaoSamples;
+    }
+
+    const float aaValue = renderer_->postOptionsUBO().chromaticAberration;
+    int aaMode = aaValue > 1.7f ? 3 : aaValue > 1.4f ? 2 : aaValue > 1.0f ? 1 : 0;
+    const char* aaModes[] = {"Off", "Fast FXAA", "Balanced FXAA", "Quality FXAA"};
+    if (ImGui::Combo("Anti-Aliasing", &aaMode, aaModes, IM_ARRAYSIZE(aaModes))) {
+        const float values[] = {0.0f, 1.25f, 1.55f, 1.79f};
+        renderer_->postOptionsUBO().chromaticAberration = values[aaMode];
+    }
+
+    ImGui::Spacing();
+    ImGui::TextDisabled("Base resources remain VRAM-safe:");
+    ImGui::BulletText("256px material textures");
+    ImGui::BulletText("75%% internal render scale");
+    ImGui::BulletText("1024px shadow allocation");
+}
+
 void Application::renderHDRControlWindow()
 {
 
