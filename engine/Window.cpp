@@ -118,8 +118,6 @@ vector<const char*> Window::getRequiredExtensions()
         }
     }
 
-    instanceExtensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
-
     printLog("GlfwRequiredInstanceExtensions: {}", glfwExtensionCount);
     for (uint32_t i = 0; i < glfwExtensionCount; ++i) {
         printLog("  {}", extensions[i]);
