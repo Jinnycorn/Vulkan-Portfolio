@@ -9,18 +9,19 @@ $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $targetDir = Join-Path $repoRoot "assets\textures\golden_gate_hills_4k"
 New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
 
-$baseUrl = "https://media.githubusercontent.com/media/KhronosGroup/glTF-Sample-Environments/main"
+$lfsBaseUrl = "https://media.githubusercontent.com/media/KhronosGroup/glTF-Sample-Environments/main"
+$rawBaseUrl = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Environments/main"
 $files = @(
     @{
-        Url = "$baseUrl/papermill/ggx/specular.ktx2"
+        Url = "$lfsBaseUrl/papermill/ggx/specular.ktx2"
         Name = "specularGGX.ktx2"
     },
     @{
-        Url = "$baseUrl/papermill/lambertian/diffuse.ktx2"
+        Url = "$lfsBaseUrl/papermill/lambertian/diffuse.ktx2"
         Name = "diffuseLambertian.ktx2"
     },
     @{
-        Url = "$baseUrl/outputLUT.png"
+        Url = "$rawBaseUrl/outputLUT.png"
         Name = "outputLUT.png"
     }
 )
