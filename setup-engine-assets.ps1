@@ -9,7 +9,7 @@ $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $targetDir = Join-Path $repoRoot "assets\textures\golden_gate_hills_4k"
 New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
 
-$baseUrl = "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Environments/main"
+$baseUrl = "https://media.githubusercontent.com/media/KhronosGroup/glTF-Sample-Environments/main"
 $files = @(
     @{
         Url = "$baseUrl/papermill/ggx/specular.ktx2"
@@ -25,20 +25,56 @@ $files = @(
     }
 )
 
+function Test-Ktx2File {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path $Path)) {
+        return $false
+    }
+
+    [byte[]]$expected = 0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A
+    [byte[]]$actual = @(Get-Content -Path $Path -Encoding Byte -TotalCount 12)
+    if ($actual.Length -ne $expected.Length) {
+        return $false
+    }
+
+    for ($index = 0; $index -lt $expected.Length; ++$index) {
+        if ($actual[$index] -ne $expected[$index]) {
+            return $false
+        }
+    }
+    return $true
+}
+
 foreach ($file in $files) {
     $destination = Join-Path $targetDir $file.Name
-    if ((Test-Path $destination) -and -not $Force) {
+    $isKtx2 = [IO.Path]::GetExtension($file.Name) -eq ".ktx2"
+    $existingIsValid = (Test-Path $destination) -and
+        (-not $isKtx2 -or (Test-Ktx2File -Path $destination))
+
+    if ($existingIsValid -and -not $Force) {
         Write-Host "Already present: $($file.Name)"
         continue
     }
 
-    Write-Host "Downloading $($file.Name) ..."
-    Invoke-WebRequest -Uri $file.Url -OutFile $destination -UseBasicParsing
+    if ((Test-Path $destination) -and -not $existingIsValid) {
+        Write-Host "Replacing invalid Git LFS pointer or corrupt file: $($file.Name)"
+    }
 
-    if (-not (Test-Path $destination) -or
-        (Get-Item $destination).Length -eq 0) {
+    $partial = "$destination.part"
+    Remove-Item -Force -ErrorAction SilentlyContinue $partial
+    Write-Host "Downloading $($file.Name) ..."
+    Invoke-WebRequest -Uri $file.Url -OutFile $partial -UseBasicParsing
+
+    if (-not (Test-Path $partial) -or (Get-Item $partial).Length -eq 0) {
         throw "Download failed: $($file.Url)"
     }
+    if ($isKtx2 -and -not (Test-Ktx2File -Path $partial)) {
+        Remove-Item -Force -ErrorAction SilentlyContinue $partial
+        throw "Downloaded file is not a valid KTX2 texture: $($file.Url)"
+    }
+
+    Move-Item -Force $partial $destination
 }
 
 $attribution = @"
