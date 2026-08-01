@@ -123,7 +123,7 @@ inline PipelineConfig PipelineConfig::createPbrForward()
     config.depthStencil = {true, true, VK_COMPARE_OP_LESS_OR_EQUAL};
     config.multisample.type = Multisample::Type::Variable;
     config.rasterization.cullMode = VK_CULL_MODE_BACK_BIT;
-    config.rasterization.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    config.rasterization.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     return config;
 }
 
@@ -136,7 +136,7 @@ inline PipelineConfig PipelineConfig::createPbrDeferred()
     config.depthStencil = {true, true, VK_COMPARE_OP_LESS_OR_EQUAL};
     config.multisample.type = Multisample::Type::Variable;
     config.rasterization.cullMode = VK_CULL_MODE_BACK_BIT;
-    config.rasterization.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    config.rasterization.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     return config;
 }
 
@@ -156,7 +156,7 @@ inline PipelineConfig PipelineConfig::createShadowMap()
     config.vertexInput.type = VertexInput::Type::Standard;
     config.depthStencil = {true, true, VK_COMPARE_OP_LESS};
     config.rasterization = {.cullMode = VK_CULL_MODE_BACK_BIT,
-                            .frontFace = VK_FRONT_FACE_CLOCKWISE,
+                            .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
                             .depthClampEnable = true,
                             .depthBiasEnable = true,
                             .depthBiasConstantFactor = 1.1f,
