@@ -434,27 +434,50 @@ void Context::createInstance(vector<const char*> requiredInstanceExtensions)
 void Context::createLogicalDevice(bool useSwapChain)
 {
     const VkQueueFlags requestedQueueTypes = VK_QUEUE_COMPUTE_BIT | VK_QUEUE_GRAPHICS_BIT;
+    const bool supportsVulkan12 = deviceProperties_.apiVersion >= VK_API_VERSION_1_2;
+    const bool supportsVulkan13 = deviceProperties_.apiVersion >= VK_API_VERSION_1_3;
 
-    // Check for descriptor indexing extension support
-    const char* descriptorIndexingExt = VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME;
-    if (!extensionSupported(descriptorIndexingExt)) {
-        exitWithMessage("Required extension \"{}\" is not supported by the selected GPU. "
-                        "Bindless textures require this extension for proper functionality.",
-                        descriptorIndexingExt);
+    if (!supportsVulkan12 &&
+        !extensionSupported(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME)) {
+        exitWithMessage(
+            "The selected GPU needs Vulkan 1.2 or {} for bindless textures.",
+            VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
     }
 
-    // Query descriptor indexing features
-    VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexingFeatures{};
-    descriptorIndexingFeatures.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+    if (!supportsVulkan13) {
+        if (!extensionSupported(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) ||
+            !extensionSupported(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME)) {
+            exitWithMessage(
+                "The selected GPU exposes Vulkan {}.{}. This engine requires Vulkan 1.3 or both "
+                "{} and {}.",
+                VK_API_VERSION_MAJOR(deviceProperties_.apiVersion),
+                VK_API_VERSION_MINOR(deviceProperties_.apiVersion),
+                VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+                VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
+        }
+    }
 
-    VkPhysicalDeviceFeatures2 deviceFeatures2{};
-    deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    deviceFeatures2.pNext = &descriptorIndexingFeatures;
+    VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexingFeatures{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES};
+    VkPhysicalDeviceVulkan13Features features13{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+    VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamicRenderingFeatures{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR};
+    VkPhysicalDeviceSynchronization2FeaturesKHR synchronization2Features{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR};
 
-    vkGetPhysicalDeviceFeatures2(physicalDevice_, &deviceFeatures2);
+    VkPhysicalDeviceFeatures2 queriedFeatures{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+    if (supportsVulkan13) {
+        queriedFeatures.pNext = &features13;
+        features13.pNext = &descriptorIndexingFeatures;
+    } else {
+        queriedFeatures.pNext = &dynamicRenderingFeatures;
+        dynamicRenderingFeatures.pNext = &synchronization2Features;
+        synchronization2Features.pNext = &descriptorIndexingFeatures;
+    }
+    vkGetPhysicalDeviceFeatures2(physicalDevice_, &queriedFeatures);
 
-    // Check required descriptor indexing features
     if (!descriptorIndexingFeatures.descriptorBindingPartiallyBound ||
         !descriptorIndexingFeatures.runtimeDescriptorArray ||
         !descriptorIndexingFeatures.descriptorBindingVariableDescriptorCount) {
@@ -468,109 +491,107 @@ void Context::createLogicalDevice(bool useSwapChain)
             descriptorIndexingFeatures.descriptorBindingVariableDescriptorCount ? "YES" : "NO");
     }
 
-    printLog("Descriptor indexing features supported:");
-    printLog("  descriptorBindingPartiallyBound: YES");
-    printLog("  runtimeDescriptorArray: YES");
-    printLog("  descriptorBindingVariableDescriptorCount: YES");
+    if (supportsVulkan13) {
+        if (!features13.dynamicRendering || !features13.synchronization2) {
+            exitWithMessage(
+                "GPU reports Vulkan 1.3 but dynamicRendering or synchronization2 is unavailable.");
+        }
+    } else if (!dynamicRenderingFeatures.dynamicRendering ||
+               !synchronization2Features.synchronization2) {
+        exitWithMessage(
+            "GPU extensions are present, but their required Vulkan features are unavailable.");
+    }
 
-    VkPhysicalDeviceVulkan13Features enabledFeatures13{
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
-    enabledFeatures13.dynamicRendering = VK_TRUE;
-    enabledFeatures13.synchronization2 = VK_TRUE;
+    printLog("Using Vulkan {}.{} device path ({})",
+             VK_API_VERSION_MAJOR(deviceProperties_.apiVersion),
+             VK_API_VERSION_MINOR(deviceProperties_.apiVersion),
+             supportsVulkan13 ? "core 1.3" : "1.2 compatibility extensions");
 
     vector<VkDeviceQueueCreateInfo> queueCreateInfos{};
+    const float defaultQueuePriority = 0.0f;
 
-    const float defaultQueuePriority(0.0f);
+    queueFamilyIndices_.graphics = getQueueFamilyIndex(VK_QUEUE_GRAPHICS_BIT);
+    VkDeviceQueueCreateInfo graphicsQueueInfo{};
+    graphicsQueueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    graphicsQueueInfo.queueFamilyIndex = queueFamilyIndices_.graphics;
+    graphicsQueueInfo.queueCount = 1;
+    graphicsQueueInfo.pQueuePriorities = &defaultQueuePriority;
+    queueCreateInfos.push_back(graphicsQueueInfo);
 
-    if (requestedQueueTypes & VK_QUEUE_GRAPHICS_BIT) {
-        queueFamilyIndices_.graphics = getQueueFamilyIndex(VK_QUEUE_GRAPHICS_BIT);
-        VkDeviceQueueCreateInfo queueInfo{};
-        queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        queueInfo.queueFamilyIndex = queueFamilyIndices_.graphics;
-        queueInfo.queueCount = 1;
-        queueInfo.pQueuePriorities = &defaultQueuePriority;
-        queueCreateInfos.push_back(queueInfo);
-    } else {
-        queueFamilyIndices_.graphics = 0;
+    queueFamilyIndices_.compute = getQueueFamilyIndex(VK_QUEUE_COMPUTE_BIT);
+    if (queueFamilyIndices_.compute != queueFamilyIndices_.graphics) {
+        VkDeviceQueueCreateInfo computeQueueInfo{};
+        computeQueueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        computeQueueInfo.queueFamilyIndex = queueFamilyIndices_.compute;
+        computeQueueInfo.queueCount = 1;
+        computeQueueInfo.pQueuePriorities = &defaultQueuePriority;
+        queueCreateInfos.push_back(computeQueueInfo);
     }
 
-    if (requestedQueueTypes & VK_QUEUE_COMPUTE_BIT) {
-        queueFamilyIndices_.compute = getQueueFamilyIndex(VK_QUEUE_COMPUTE_BIT);
-        if (queueFamilyIndices_.compute != queueFamilyIndices_.graphics) {
-
-            VkDeviceQueueCreateInfo queueInfo{};
-            queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-            queueInfo.queueFamilyIndex = queueFamilyIndices_.compute;
-            queueInfo.queueCount = 1;
-            queueInfo.pQueuePriorities = &defaultQueuePriority;
-            queueCreateInfos.push_back(queueInfo);
-        }
-    } else {
-
-        queueFamilyIndices_.compute = queueFamilyIndices_.graphics;
-    }
-
-    if (requestedQueueTypes & VK_QUEUE_TRANSFER_BIT) {
-        queueFamilyIndices_.transfer = getQueueFamilyIndex(VK_QUEUE_TRANSFER_BIT);
-        if ((queueFamilyIndices_.transfer != queueFamilyIndices_.graphics) &&
-            (queueFamilyIndices_.transfer != queueFamilyIndices_.compute)) {
-
-            VkDeviceQueueCreateInfo queueInfo{};
-            queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-            queueInfo.queueFamilyIndex = queueFamilyIndices_.transfer;
-            queueInfo.queueCount = 1;
-            queueInfo.pQueuePriorities = &defaultQueuePriority;
-            queueCreateInfos.push_back(queueInfo);
-        }
-    } else {
-        queueFamilyIndices_.transfer = queueFamilyIndices_.graphics;
-    }
+    queueFamilyIndices_.transfer = queueFamilyIndices_.graphics;
 
     vector<const char*> deviceExtensions(enabledDeviceExtensions_);
     if (useSwapChain) {
         deviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     }
+    if (!supportsVulkan12) {
+        deviceExtensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
+    }
+    if (!supportsVulkan13) {
+        deviceExtensions.push_back(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
+        deviceExtensions.push_back(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
+    }
 
-    // Add descriptor indexing extension
-    deviceExtensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
+    for (const char* enabledExtension : deviceExtensions) {
+        if (!extensionSupported(enabledExtension)) {
+            exitWithMessage("Enabled device extension \"{}\" is not present at device level",
+                            enabledExtension);
+        }
+    }
 
     enabledFeatures_.samplerAnisotropy = deviceFeatures_.samplerAnisotropy;
     enabledFeatures_.depthClamp = deviceFeatures_.depthClamp;
     enabledFeatures_.depthBiasClamp = deviceFeatures_.depthBiasClamp;
 
-    // Enable descriptor indexing features
+    descriptorIndexingFeatures = {
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES};
     descriptorIndexingFeatures.descriptorBindingPartiallyBound = VK_TRUE;
     descriptorIndexingFeatures.runtimeDescriptorArray = VK_TRUE;
     descriptorIndexingFeatures.descriptorBindingVariableDescriptorCount = VK_TRUE;
 
-    VkDeviceCreateInfo deviceCreateInfo = {};
-    deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
-    deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
-    deviceCreateInfo.pEnabledFeatures = &enabledFeatures_;
+    features13 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+    dynamicRenderingFeatures = {
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR};
+    synchronization2Features = {
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR};
 
-    VkPhysicalDeviceFeatures2 physicalDeviceFeatures2{};
-    physicalDeviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    physicalDeviceFeatures2.features = enabledFeatures_;
-    physicalDeviceFeatures2.pNext = &enabledFeatures13;
+    VkPhysicalDeviceFeatures2 enabledFeatures2{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+    enabledFeatures2.features = enabledFeatures_;
 
-    // Chain descriptor indexing features
-    enabledFeatures13.pNext = &descriptorIndexingFeatures;
-
-    deviceCreateInfo.pEnabledFeatures = nullptr;
-    deviceCreateInfo.pNext = &physicalDeviceFeatures2;
-
-    if (deviceExtensions.size() > 0) {
-        for (const char* enabledExtension : deviceExtensions) {
-            if (!extensionSupported(enabledExtension)) {
-                exitWithMessage("Enabled device extension \"{}\" is not present at device level",
-                                enabledExtension);
-            }
-        }
-
-        deviceCreateInfo.enabledExtensionCount = (uint32_t)deviceExtensions.size();
-        deviceCreateInfo.ppEnabledExtensionNames = deviceExtensions.data();
+    if (supportsVulkan13) {
+        features13.dynamicRendering = VK_TRUE;
+        features13.synchronization2 = VK_TRUE;
+        enabledFeatures2.pNext = &features13;
+        features13.pNext = &descriptorIndexingFeatures;
+    } else {
+        dynamicRenderingFeatures.dynamicRendering = VK_TRUE;
+        synchronization2Features.synchronization2 = VK_TRUE;
+        enabledFeatures2.pNext = &dynamicRenderingFeatures;
+        dynamicRenderingFeatures.pNext = &synchronization2Features;
+        synchronization2Features.pNext = &descriptorIndexingFeatures;
     }
+
+    VkDeviceCreateInfo deviceCreateInfo{};
+    deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    deviceCreateInfo.queueCreateInfoCount =
+        static_cast<uint32_t>(queueCreateInfos.size());
+    deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
+    deviceCreateInfo.enabledExtensionCount =
+        static_cast<uint32_t>(deviceExtensions.size());
+    deviceCreateInfo.ppEnabledExtensionNames =
+        deviceExtensions.empty() ? nullptr : deviceExtensions.data();
+    deviceCreateInfo.pNext = &enabledFeatures2;
 
     check(vkCreateDevice(physicalDevice_, &deviceCreateInfo, nullptr, &device_));
 
@@ -580,14 +601,7 @@ void Context::createLogicalDevice(bool useSwapChain)
     } else {
         computeCommandPool_ = graphicsCommandPool_;
     }
-    if (queueFamilyIndices_.transfer != queueFamilyIndices_.graphics &&
-        queueFamilyIndices_.transfer != queueFamilyIndices_.compute) {
-        transferCommandPool_ = createCommandPool(queueFamilyIndices_.transfer);
-    } else if (queueFamilyIndices_.transfer == queueFamilyIndices_.compute) {
-        transferCommandPool_ = computeCommandPool_;
-    } else {
-        transferCommandPool_ = graphicsCommandPool_;
-    }
+    transferCommandPool_ = graphicsCommandPool_;
 }
 
 uint32_t Context::getQueueFamilyIndex(VkQueueFlags queueFlags) const
