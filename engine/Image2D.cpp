@@ -6,7 +6,9 @@
 #include <ktx.h>
 #include <ktxvulkan.h>
 #include <stb_image.h>
-#include <filesystem>\n#include <cmath>\n#include <vector>
+#include <filesystem>
+#include <cmath>
+#include <vector>
 
 // STB implementation - define once per library
 #define STB_IMAGE_IMPLEMENTATION
