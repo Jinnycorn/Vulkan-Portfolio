@@ -113,8 +113,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ""
-Write-Host "Building Basic_Context ($Configuration) ..."
-& cmake --build $buildDir --config $Configuration --target Basic_Context --parallel
+Write-Host "Building Basic_Window ($Configuration) ..."
+& cmake --build $buildDir --config $Configuration --target Basic_Window --parallel
 if ($LASTEXITCODE -ne 0) {
     throw "Build failed."
 }
@@ -125,11 +125,11 @@ if (-not (Test-Path $exe)) {
 }
 
 Write-Host ""
-Write-Host "Running Basic_Context ..."
+Write-Host "Running Basic_Window ..."
 & $exe
 if ($LASTEXITCODE -ne 0) {
-    throw "Basic_Context failed (exit code $LASTEXITCODE)."
+    throw "Basic_Window failed (exit code $LASTEXITCODE)."
 }
 
 Write-Host ""
-Write-Host "Success: Vulkan SDK and GPU initialization are working."
+Write-Host "Success: the Vulkan graphics window opened and closed normally."
