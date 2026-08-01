@@ -72,11 +72,12 @@ void ViewFrustum::extractFromViewProjection(const glm::mat4 &viewProjection)
     planes_[sTOP].normal.z = m[11] - m[9];
     planes_[sTOP].distance = m[15] - m[13];
 
-    // Near plane: m[3] + m[2], m[7] + m[6], m[11] + m[10], m[15] + m[14]
-    planes_[sNEAR].normal.x = m[3] + m[2];
-    planes_[sNEAR].normal.y = m[7] + m[6];
-    planes_[sNEAR].normal.z = m[11] + m[10];
-    planes_[sNEAR].distance = m[15] + m[14];
+    // Vulkan uses a zero-to-one clip-space depth range. Its near plane is row 2,
+    // unlike OpenGL's row 3 + row 2 extraction for a minus-one-to-one range.
+    planes_[sNEAR].normal.x = m[2];
+    planes_[sNEAR].normal.y = m[6];
+    planes_[sNEAR].normal.z = m[10];
+    planes_[sNEAR].distance = m[14];
 
     // Far plane: m[3] - m[2], m[7] - m[6], m[11] - m[10], m[15] - m[14]
     planes_[sFAR].normal.x = m[3] - m[2];
