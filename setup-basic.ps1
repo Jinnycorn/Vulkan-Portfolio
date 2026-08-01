@@ -119,7 +119,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Build failed."
 }
 
-$exe = Join-Path $buildDir "$Configuration\Basic_Context.exe"
+$exe = Join-Path $buildDir "$Configuration\Basic_Window.exe"
 if (-not (Test-Path $exe)) {
     throw "Executable was not created: $exe"
 }
