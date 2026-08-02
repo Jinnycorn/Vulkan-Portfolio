@@ -276,6 +276,8 @@ void Swapchain::create(VkExtent2D& expectedWindowSize, bool vsync)
         check(vkCreateImageView(ctx_.device(), &colorAttachmentView, nullptr, &imageViews_[i]));
     }
 
+    // Discard state for the old swapchain images before creating new helpers.
+    barrierHelpers.clear();
     barrierHelpers.reserve(imageCount_);
     for (uint32_t i = 0; i < imageCount_; i++) {
         barrierHelpers.emplace_back(images_[i]);
