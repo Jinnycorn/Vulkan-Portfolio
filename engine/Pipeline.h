@@ -89,6 +89,13 @@ class Pipeline
 
     void setDescriptorSets(vector<vector<reference_wrapper<DescriptorSet>>>& descriptorSets);
 
+    void refreshComputeDimensions()
+    {
+        if (bindPoint_ == VK_PIPELINE_BIND_POINT_COMPUTE) {
+            determineDimensionsFromFirstWriteOnlyBinding();
+        }
+    }
+
     void bindDescriptorSets(const VkCommandBuffer& cmd, uint32_t frameIndex)
     {
         assert(frameIndex < descriptorSetHandles_.size() && "Frame index out of bounds");
