@@ -220,6 +220,7 @@ class Application
 
     VkExtent2D windowSize_{};
     bool framebufferResized_{false};
+    double framebufferResizeDeadline_{0.0};
 
     MouseState mouseState_;
     Camera camera_;
