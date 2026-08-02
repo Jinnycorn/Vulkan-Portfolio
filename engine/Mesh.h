@@ -33,6 +33,11 @@ class Mesh
           minBounds(other.minBounds), maxBounds(other.maxBounds), worldBounds(other.worldBounds),
           isCulled(other.isCulled), noTextureCoords(other.noTextureCoords)
     {
+        for (uint32_t i = 0; i < 3; ++i) {
+            lodIndexCounts_[i] = other.lodIndexCounts_[i];
+            lodIndexOffsets_[i] = other.lodIndexOffsets_[i];
+        }
+    {
         // Reset moved-from object to safe state
         other.vertexBuffer_ = VK_NULL_HANDLE;
         other.vertexMemory_ = VK_NULL_HANDLE;
@@ -70,6 +75,10 @@ class Mesh
             worldBounds = other.worldBounds;
             isCulled = other.isCulled;
             noTextureCoords = other.noTextureCoords;
+            for (uint32_t i = 0; i < 3; ++i) {
+                lodIndexCounts_[i] = other.lodIndexCounts_[i];
+                lodIndexOffsets_[i] = other.lodIndexOffsets_[i];
+            }
 
             // Reset moved-from object to safe state
             other.vertexBuffer_ = VK_NULL_HANDLE;
@@ -104,6 +113,15 @@ class Mesh
     void cleanup(VkDevice device);
     void calculateBounds(); // Made public
 
+    uint32_t lodIndexCount(uint32_t level) const
+    {
+        return lodIndexCounts_[level < 3 ? level : 2];
+    }
+    VkDeviceSize lodIndexOffset(uint32_t level) const
+    {
+        return lodIndexOffsets_[level < 3 ? level : 2];
+    }
+
     // Update Mesh::updateWorldBounds implementation
     void updateWorldBounds(const glm::mat4& modelMatrix);
 
@@ -119,6 +137,11 @@ class Mesh
     bool writeToBinaryFileStream(std::ofstream& stream) const;
 
   private:
+    // Three index-only LODs share the full vertex buffer. They are generated when
+    // Vulkan buffers are created, so existing model cache files remain compatible.
+    uint32_t lodIndexCounts_[3]{0, 0, 0};
+    VkDeviceSize lodIndexOffsets_[3]{0, 0, 0};
+
     // Helper methods for binary I/O
     template <typename T>
     bool writeValue(std::ofstream& stream, const T& value) const;
