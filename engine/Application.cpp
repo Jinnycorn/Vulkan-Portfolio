@@ -380,6 +380,7 @@ void Application::setupCallbacks()
         // Zero-sized framebuffers occur while minimized. Defer recreation until the
         // window is visible again and GLFW reports its final maximized/restored size.
         app->framebufferResized_ = true;
+        app->framebufferResizeDeadline_ = glfwGetTime() + 0.25;
     });
 }
 
@@ -406,10 +407,9 @@ void Application::recreateSwapchain()
         check(vkCreateSemaphore(ctx_.device(), &semaphoreInfo, nullptr, &semaphore));
     }
 
-    // Keep model/material resources alive. Only screen-sized render attachments and
-    // the descriptor sets that reference them need new Vulkan handles.
-    renderer_->resize(windowSize_.width, windowSize_.height);
-
+    // Keep the existing internal render targets. The final post-processing pass
+    // samples them into the new swapchain extent, providing safe low-VRAM upscaling
+    // without invalidating model textures, image descriptors or compute resources.
     const float aspectRatio = float(windowSize_.width) / float(windowSize_.height);
     camera_.setPerspective(camera_.fov, aspectRatio, camera_.znear, camera_.zfar);
     guiRenderer_.resize(windowSize_.width, windowSize_.height);
@@ -464,10 +464,10 @@ void Application::run()
         }
 
         if (framebufferResized_) {
-            recreateSwapchain();
-            // Keep polling while minimized; recreation completes after restore.
-            if (framebufferResized_) {
-                continue;
+            // Windows may emit several intermediate sizes during maximize animation.
+            // Do not churn Vulkan resources until the final framebuffer size is stable.
+            if (glfwGetTime() >= framebufferResizeDeadline_) {
+                recreateSwapchain();
             }
             continue;
         }
@@ -602,12 +602,14 @@ void Application::run()
 
         if (result == VK_ERROR_OUT_OF_DATE_KHR) {
             framebufferResized_ = true;
+            framebufferResizeDeadline_ = glfwGetTime() + 0.10;
             continue;
         } else if ((result != VK_SUCCESS) && (result != VK_SUBOPTIMAL_KHR)) {
             exitWithMessage("Could not acquire the next swap chain image!");
         }
         if (result == VK_SUBOPTIMAL_KHR) {
             framebufferResized_ = true;
+            framebufferResizeDeadline_ = glfwGetTime() + 0.10;
         }
 
         // Use currentFrame index (CPU-side command buffer)
@@ -729,6 +731,7 @@ void Application::run()
             if (presentResult == VK_ERROR_OUT_OF_DATE_KHR ||
                 presentResult == VK_SUBOPTIMAL_KHR) {
                 framebufferResized_ = true;
+                framebufferResizeDeadline_ = glfwGetTime() + 0.10;
             } else {
                 check(presentResult);
             }
