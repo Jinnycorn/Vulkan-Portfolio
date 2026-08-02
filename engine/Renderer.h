@@ -284,7 +284,7 @@ class Renderer
     uint64_t renderFrameCounter_{0};
     static constexpr uint32_t kOcclusionRetestInterval = 8;
 
-    bool lodEnabled_{true};
+    bool lodEnabled_{false};
     float lod1PixelThreshold_{110.0f};
     float lod2PixelThreshold_{36.0f};
     float lodCullPixelThreshold_{2.0f};
