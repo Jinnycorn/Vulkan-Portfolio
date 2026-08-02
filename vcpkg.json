@@ -13,6 +13,7 @@
       "name": "imgui",
       "features": [ "wchar32" ]
     },
+    "imguizmo",
     {
       "name": "ktx",
       "features": [ "tools", "vulkan" ]
