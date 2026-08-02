@@ -235,6 +235,16 @@ class Application
 
     vector<unique_ptr<Model>> models_;
 
+    // Per-mesh scene editor state. Mesh removal is non-destructive and reversible.
+    int selectedModelIndex_{0};
+    int selectedMeshIndex_{-1};
+    int gizmoOperation_{0}; // 0=translate, 1=rotate, 2=scale
+    bool gizmoLocalSpace_{true};
+    bool gizmoSnapEnabled_{false};
+    float gizmoTranslationSnap_{0.25f};
+    float gizmoRotationSnap_{5.0f};
+    float gizmoScaleSnap_{0.1f};
+
     GuiRenderer guiRenderer_;
     unique_ptr<Renderer> renderer_;
 
@@ -261,6 +271,8 @@ class Application
     // FPS calculation method
     void updatePerformanceMetrics(float deltaTime);
 
+    void renderAssetEditorPanel();
+    void renderSelectedAssetGizmo();
     void renderQualityControlPanel();
     void renderHDRControlWindow();
     void renderPostProcessingControlWindow();
