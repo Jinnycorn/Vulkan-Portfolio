@@ -1058,18 +1058,42 @@ void Application::updateGui()
 
 void Application::renderAssetEditorPanel()
 {
+    constexpr float assetPanelHeight = 310.0f;
+    const float inspectorWidth =
+        std::clamp(float(windowSize_.width) * 0.30f, 340.0f, 410.0f);
+    const float panelWidth = std::max(1.0f, float(windowSize_.width) - inspectorWidth);
+
+    ImGui::SetNextWindowPos(
+        ImVec2(0.0f, float(windowSize_.height) - assetPanelHeight), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(panelWidth, assetPanelHeight), ImGuiCond_Always);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    constexpr ImGuiWindowFlags assetWindowFlags =
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoTitleBar;
+    ImGui::Begin("##BottomAssetManager", nullptr, assetWindowFlags);
+
+    ImGui::TextColored(ImVec4(0.37f, 0.68f, 1.0f, 1.0f), "ASSET MANAGER");
+    ImGui::SameLine();
+    ImGui::TextDisabled(
+        "Left click viewport to select  |  Right/Middle drag camera  |  Gizmo to edit");
     ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.37f, 0.68f, 1.0f, 1.0f), "ASSET EDITOR");
-    ImGui::TextDisabled("Select a Bistro mesh, then place or remove it non-destructively.");
 
     if (models_.empty()) {
         ImGui::TextDisabled("No models loaded.");
+        ImGui::End();
+        ImGui::PopStyleVar();
         return;
     }
 
     selectedModelIndex_ = std::clamp(selectedModelIndex_, 0, int(models_.size()) - 1);
+    auto& meshes = models_[selectedModelIndex_]->meshes();
+
+    const float leftWidth = std::clamp(panelWidth * 0.40f, 300.0f, 520.0f);
+    ImGui::BeginChild("##AssetBrowser", ImVec2(leftWidth, 0.0f), false);
+
     const char* modelPreview = models_[selectedModelIndex_]->name().c_str();
-    if (ImGui::BeginCombo("Model", modelPreview)) {
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::BeginCombo("##AssetModel", modelPreview)) {
         for (int modelIndex = 0; modelIndex < int(models_.size()); ++modelIndex) {
             const bool selected = selectedModelIndex_ == modelIndex;
             if (ImGui::Selectable(models_[modelIndex]->name().c_str(), selected)) {
@@ -1083,11 +1107,11 @@ void Application::renderAssetEditorPanel()
         ImGui::EndCombo();
     }
 
-    auto& meshes = models_[selectedModelIndex_]->meshes();
     static ImGuiTextFilter assetFilter;
     assetFilter.Draw("Search assets", -1.0f);
 
-    if (ImGui::BeginChild("##AssetList", ImVec2(0.0f, 190.0f), true)) {
+    const float listHeight = std::max(80.0f, ImGui::GetContentRegionAvail().y - 64.0f);
+    if (ImGui::BeginChild("##AssetList", ImVec2(0.0f, listHeight), true)) {
         ImGuiListClipper clipper;
         clipper.Begin(static_cast<int>(meshes.size()));
         while (clipper.Step()) {
@@ -1118,9 +1142,9 @@ void Application::renderAssetEditorPanel()
     }
     ImGui::EndChild();
 
-    const float layoutButtonWidth =
-        std::max(90.0f, (ImGui::GetContentRegionAvail().x - 8.0f) * 0.5f);
-    if (ImGui::Button("Save Layout", ImVec2(layoutButtonWidth, 0.0f))) {
+    const float smallButtonWidth =
+        std::max(80.0f, (ImGui::GetContentRegionAvail().x - 8.0f) * 0.5f);
+    if (ImGui::Button("Save Layout", ImVec2(smallButtonWidth, 0.0f))) {
         std::ofstream output("BistroScene.layout", std::ios::trunc);
         if (output) {
             output << "HLAB_SCENE_LAYOUT_V1\n" << meshes.size() << '\n';
@@ -1136,7 +1160,7 @@ void Application::renderAssetEditorPanel()
         }
     }
     ImGui::SameLine();
-    if (ImGui::Button("Load Layout", ImVec2(layoutButtonWidth, 0.0f))) {
+    if (ImGui::Button("Load Layout", ImVec2(smallButtonWidth, 0.0f))) {
         std::ifstream input("BistroScene.layout");
         string header;
         size_t meshCount = 0;
@@ -1157,81 +1181,104 @@ void Application::renderAssetEditorPanel()
             printLog("BistroScene.layout is missing or does not match the loaded model");
         }
     }
+    ImGui::EndChild();
 
-    if (ImGui::Button("Restore All Removed", ImVec2(-1.0f, 0.0f))) {
-        for (auto& mesh : meshes) {
-            mesh.editorVisible = true;
-        }
-    }
+    ImGui::SameLine();
+    ImGui::BeginChild("##AssetProperties", ImVec2(0.0f, 0.0f), true);
 
     if (selectedMeshIndex_ < 0 || selectedMeshIndex_ >= int(meshes.size())) {
-        ImGui::TextDisabled("Select an asset to show its transform gizmo.");
-        return;
-    }
-
-    auto& selectedMesh = meshes[selectedMeshIndex_];
-    const string selectedName = selectedMesh.name_.empty()
-                                    ? std::format("Mesh {}", selectedMeshIndex_)
-                                    : selectedMesh.name_;
-    ImGui::TextWrapped("Selected: %s", selectedName.c_str());
-
-    const float thirdWidth = std::max(70.0f, (ImGui::GetContentRegionAvail().x - 16.0f) / 3.0f);
-    if (ImGui::Selectable("Move", gizmoOperation_ == 0, 0, ImVec2(thirdWidth, 0.0f))) {
-        gizmoOperation_ = 0;
-    }
-    ImGui::SameLine();
-    if (ImGui::Selectable("Rotate", gizmoOperation_ == 1, 0, ImVec2(thirdWidth, 0.0f))) {
-        gizmoOperation_ = 1;
-    }
-    ImGui::SameLine();
-    if (ImGui::Selectable("Scale", gizmoOperation_ == 2, 0, ImVec2(thirdWidth, 0.0f))) {
-        gizmoOperation_ = 2;
-    }
-
-    ImGui::Checkbox("Local Space", &gizmoLocalSpace_);
-    ImGui::SameLine();
-    ImGui::Checkbox("Snap", &gizmoSnapEnabled_);
-    if (gizmoSnapEnabled_) {
-        if (gizmoOperation_ == 0) {
-            ImGui::DragFloat("Move Snap", &gizmoTranslationSnap_, 0.01f, 0.01f, 10.0f, "%.2f");
-        } else if (gizmoOperation_ == 1) {
-            ImGui::DragFloat("Angle Snap", &gizmoRotationSnap_, 1.0f, 1.0f, 90.0f, "%.0f deg");
-        } else {
-            ImGui::DragFloat("Scale Snap", &gizmoScaleSnap_, 0.01f, 0.01f, 1.0f, "%.2f");
-        }
-    }
-
-    float translation[3]{};
-    float rotation[3]{};
-    float scale[3]{1.0f, 1.0f, 1.0f};
-    ImGuizmo::DecomposeMatrixToComponents(glm::value_ptr(selectedMesh.editorTransform),
-                                          translation, rotation, scale);
-
-    bool transformChanged = false;
-    transformChanged |= ImGui::DragFloat3("Position", translation, 0.05f);
-    transformChanged |= ImGui::DragFloat3("Rotation", rotation, 0.5f);
-    transformChanged |= ImGui::DragFloat3("Scale", scale, 0.01f, 0.001f, 100.0f);
-    if (transformChanged) {
-        ImGuizmo::RecomposeMatrixFromComponents(translation, rotation, scale,
-                                                 glm::value_ptr(selectedMesh.editorTransform));
-        selectedMesh.editorTransformDirty = true;
-    }
-
-    if (selectedMesh.editorVisible) {
-        if (ImGui::Button("Remove Asset", ImVec2(-1.0f, 0.0f))) {
-            selectedMesh.editorVisible = false;
-        }
+        ImGui::TextDisabled("Select an asset from the list or click it in the viewport.");
     } else {
-        if (ImGui::Button("Place / Restore Asset", ImVec2(-1.0f, 0.0f))) {
-            selectedMesh.editorVisible = true;
+        auto& selectedMesh = meshes[selectedMeshIndex_];
+        const string selectedName = selectedMesh.name_.empty()
+                                        ? std::format("Mesh {}", selectedMeshIndex_)
+                                        : selectedMesh.name_;
+        ImGui::Text("Selected Asset");
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.37f, 0.68f, 1.0f, 1.0f), "%s",
+                           selectedName.c_str());
+
+        const float thirdWidth =
+            std::max(70.0f, (ImGui::GetContentRegionAvail().x - 16.0f) / 3.0f);
+        if (ImGui::Selectable("Move", gizmoOperation_ == 0, 0,
+                              ImVec2(thirdWidth, 28.0f))) {
+            gizmoOperation_ = 0;
+        }
+        ImGui::SameLine();
+        if (ImGui::Selectable("Rotate", gizmoOperation_ == 1, 0,
+                              ImVec2(thirdWidth, 28.0f))) {
+            gizmoOperation_ = 1;
+        }
+        ImGui::SameLine();
+        if (ImGui::Selectable("Scale", gizmoOperation_ == 2, 0,
+                              ImVec2(thirdWidth, 28.0f))) {
+            gizmoOperation_ = 2;
+        }
+
+        ImGui::Checkbox("Local Space", &gizmoLocalSpace_);
+        ImGui::SameLine();
+        ImGui::Checkbox("Snap", &gizmoSnapEnabled_);
+        if (gizmoSnapEnabled_) {
+            ImGui::SameLine();
+            if (gizmoOperation_ == 0) {
+                ImGui::SetNextItemWidth(140.0f);
+                ImGui::DragFloat("Move Step", &gizmoTranslationSnap_, 0.01f, 0.01f, 10.0f,
+                                 "%.2f");
+            } else if (gizmoOperation_ == 1) {
+                ImGui::SetNextItemWidth(140.0f);
+                ImGui::DragFloat("Angle Step", &gizmoRotationSnap_, 1.0f, 1.0f, 90.0f,
+                                 "%.0f deg");
+            } else {
+                ImGui::SetNextItemWidth(140.0f);
+                ImGui::DragFloat("Scale Step", &gizmoScaleSnap_, 0.01f, 0.01f, 1.0f,
+                                 "%.2f");
+            }
+        }
+
+        float translation[3]{};
+        float rotation[3]{};
+        float scale[3]{1.0f, 1.0f, 1.0f};
+        ImGuizmo::DecomposeMatrixToComponents(glm::value_ptr(selectedMesh.editorTransform),
+                                              translation, rotation, scale);
+
+        bool transformChanged = false;
+        transformChanged |= ImGui::DragFloat3("Position", translation, 0.05f);
+        transformChanged |= ImGui::DragFloat3("Rotation", rotation, 0.5f);
+        transformChanged |= ImGui::DragFloat3("Scale", scale, 0.01f, 0.001f, 100.0f);
+        if (transformChanged) {
+            ImGuizmo::RecomposeMatrixFromComponents(
+                translation, rotation, scale, glm::value_ptr(selectedMesh.editorTransform));
             selectedMesh.editorTransformDirty = true;
         }
+
+        const float actionWidth =
+            std::max(100.0f, (ImGui::GetContentRegionAvail().x - 16.0f) / 3.0f);
+        if (selectedMesh.editorVisible) {
+            if (ImGui::Button("Remove Asset", ImVec2(actionWidth, 0.0f))) {
+                selectedMesh.editorVisible = false;
+            }
+        } else {
+            if (ImGui::Button("Place / Restore", ImVec2(actionWidth, 0.0f))) {
+                selectedMesh.editorVisible = true;
+                selectedMesh.editorTransformDirty = true;
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Reset Transform", ImVec2(actionWidth, 0.0f))) {
+            selectedMesh.editorTransform = glm::mat4(1.0f);
+            selectedMesh.editorTransformDirty = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Restore All", ImVec2(actionWidth, 0.0f))) {
+            for (auto& mesh : meshes) {
+                mesh.editorVisible = true;
+            }
+        }
     }
 
-    if (ImGui::Button("Reset Transform", ImVec2(-1.0f, 0.0f))) {
-        selectedMesh.editorTransform = glm::mat4(1.0f);
-        selectedMesh.editorTransformDirty = true;
-    }
+    ImGui::EndChild();
+    ImGui::End();
+    ImGui::PopStyleVar();
 }
 
 void Application::renderSelectedAssetGizmo()
