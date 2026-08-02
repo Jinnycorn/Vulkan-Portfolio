@@ -111,9 +111,9 @@ Renderer::Renderer(Context& ctx, ShaderManager& shaderManager, const uint32_t& k
         postOptionsUBO_.chromaticAberration = 0.0f;
         postOptionsUBO_.vignetteStrength = 0.0f;
         postOptionsUBO_.filmGrainStrength = 0.0f;
-        lod1PixelThreshold_ = 140.0f;
-        lod2PixelThreshold_ = 48.0f;
-        lodCullPixelThreshold_ = 3.0f;
+        lod1PixelThreshold_ = 115.0f;
+        lod2PixelThreshold_ = 38.0f;
+        lodCullPixelThreshold_ = 2.0f;
         printLog("Low-spec renderer preset enabled (Optimized quality level + automatic LOD)");
     }
 
