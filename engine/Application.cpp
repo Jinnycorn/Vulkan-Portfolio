@@ -1453,13 +1453,10 @@ void Application::renderSelectedAssetGizmo()
     }
 
     ImGuizmo::SetOrthographic(false);
-    ImGuizmo::SetDrawlist(ImGui::GetForegroundDrawList());
-
-    const float panelWidth =
-        std::clamp(float(windowSize_.width) * 0.30f, 340.0f, 410.0f);
-    constexpr float assetPanelHeight = 310.0f;
-    ImGuizmo::SetRect(0.0f, 0.0f, float(windowSize_.width) - panelWidth,
-                      float(windowSize_.height) - assetPanelHeight);
+    // The scene uses the full swapchain projection. Draw the gizmo over that exact
+    // rectangle on the background layer so editor panels naturally cover it.
+    ImGuizmo::SetDrawlist(ImGui::GetBackgroundDrawList());
+    ImGuizmo::SetRect(0.0f, 0.0f, float(windowSize_.width), float(windowSize_.height));
 
     ImGuizmo::OPERATION operation = ImGuizmo::TRANSLATE;
     if (gizmoOperation_ == 1) {
