@@ -198,109 +198,82 @@ vec3 addFilmGrain(vec3 color, vec2 uv) {
 // ===== ADVANCED FXAA IMPLEMENTATION =====
 
 float fxaaLuma(vec3 rgb) {
-    return sqrt(dot(rgb, vec3(0.299, 0.587, 0.114)));
+    // Compress HDR luminance before edge comparison. This keeps the thresholds stable
+    // before tone mapping and prevents bright Bistro highlights from hiding thin edges.
+    float linearLuma = dot(max(rgb, vec3(0.0)), vec3(0.299, 0.587, 0.114));
+    return linearLuma / (1.0 + linearLuma);
 }
 
-// Enhanced FXAA with multiple quality levels and better edge detection
+// Directional 9-tap FXAA. Strength adjusts edge sensitivity and final coverage,
+// while the tap count stays fixed so frame cost is predictable on low-VRAM GPUs.
 vec3 fxaaAdvanced(vec2 uv, float fxaaStrength) {
-    vec2 texelSize = 1.0 / textureSize(floatColor2, 0);
-    
-    // Determine quality level from strength (encoded in fractional part)
-    float baseStrength = floor(fxaaStrength * 10.0) / 10.0;
-    float qualityLevel = (fxaaStrength - baseStrength) * 10.0;
-    
-    int sampleCount = int(mix(4.0, 12.0, qualityLevel)); // 4-12 samples based on quality
-    bool useExtendedSampling = qualityLevel > 0.5;
-    
-    // Sample center and immediate neighbors
-    vec3 rgbM = texture(floatColor2, uv).rgb;
-    vec3 rgbN = texture(floatColor2, uv + vec2(0.0, -texelSize.y)).rgb;
-    vec3 rgbS = texture(floatColor2, uv + vec2(0.0, texelSize.y)).rgb;
-    vec3 rgbW = texture(floatColor2, uv + vec2(-texelSize.x, 0.0)).rgb;
-    vec3 rgbE = texture(floatColor2, uv + vec2(texelSize.x, 0.0)).rgb;
-    
-    // Calculate luminance
-    float lumaM = fxaaLuma(rgbM);
-    float lumaN = fxaaLuma(rgbN);
-    float lumaS = fxaaLuma(rgbS);
-    float lumaW = fxaaLuma(rgbW);
-    float lumaE = fxaaLuma(rgbE);
-    
-    // Find min/max luminance
-    float lumaMin = min(lumaM, min(min(lumaN, lumaS), min(lumaW, lumaE)));
-    float lumaMax = max(lumaM, max(max(lumaN, lumaS), max(lumaW, lumaE)));
+    vec2 texelSize = 1.0 / vec2(textureSize(floatColor2, 0));
+    float strength = clamp(fxaaStrength, 0.0, 1.0);
+
+    vec3 rgbM  = texture(floatColor2, uv).rgb;
+    vec3 rgbN  = texture(floatColor2, uv + vec2(0.0, -texelSize.y)).rgb;
+    vec3 rgbS  = texture(floatColor2, uv + vec2(0.0,  texelSize.y)).rgb;
+    vec3 rgbW  = texture(floatColor2, uv + vec2(-texelSize.x, 0.0)).rgb;
+    vec3 rgbE  = texture(floatColor2, uv + vec2( texelSize.x, 0.0)).rgb;
+    vec3 rgbNW = texture(floatColor2, uv + vec2(-texelSize.x, -texelSize.y)).rgb;
+    vec3 rgbNE = texture(floatColor2, uv + vec2( texelSize.x, -texelSize.y)).rgb;
+    vec3 rgbSW = texture(floatColor2, uv + vec2(-texelSize.x,  texelSize.y)).rgb;
+    vec3 rgbSE = texture(floatColor2, uv + vec2( texelSize.x,  texelSize.y)).rgb;
+
+    float lumaM  = fxaaLuma(rgbM);
+    float lumaN  = fxaaLuma(rgbN);
+    float lumaS  = fxaaLuma(rgbS);
+    float lumaW  = fxaaLuma(rgbW);
+    float lumaE  = fxaaLuma(rgbE);
+    float lumaNW = fxaaLuma(rgbNW);
+    float lumaNE = fxaaLuma(rgbNE);
+    float lumaSW = fxaaLuma(rgbSW);
+    float lumaSE = fxaaLuma(rgbSE);
+
+    float lumaMin = min(lumaM, min(min(min(lumaN, lumaS), min(lumaW, lumaE)),
+                                   min(min(lumaNW, lumaNE), min(lumaSW, lumaSE))));
+    float lumaMax = max(lumaM, max(max(max(lumaN, lumaS), max(lumaW, lumaE)),
+                                   max(max(lumaNW, lumaNE), max(lumaSW, lumaSE))));
     float lumaRange = lumaMax - lumaMin;
-    
-    // Adaptive quality settings based on strength
-    float edgeThreshold = mix(0.2, 0.125, baseStrength);        // More sensitive at higher quality
-    float edgeThresholdMin = mix(0.1, 0.0625, baseStrength);    // Minimum threshold
-    float subpixelQuality = mix(0.5, 0.85, baseStrength);       // Blend amount
-    
-    // Skip FXAA if contrast is too low
-    if (lumaRange < max(edgeThresholdMin, lumaMax * edgeThreshold)) {
+
+    // Lower thresholds than the previous implementation catch railings, roof lines,
+    // foliage and distant geometry without applying a full-screen blur.
+    float relativeThreshold = mix(0.110, 0.040, strength);
+    float absoluteThreshold = mix(0.045, 0.012, strength);
+    if (lumaRange < max(absoluteThreshold, lumaMax * relativeThreshold)) {
         return rgbM;
     }
-    
-    // Extended sampling for higher quality
-    vec3 rgbNW = vec3(0.0), rgbNE = vec3(0.0), rgbSW = vec3(0.0), rgbSE = vec3(0.0);
-    float lumaNW = 0.0, lumaNE = 0.0, lumaSW = 0.0, lumaSE = 0.0;
-    
-    if (useExtendedSampling) {
-        rgbNW = texture(floatColor2, uv + vec2(-texelSize.x, -texelSize.y)).rgb;
-        rgbNE = texture(floatColor2, uv + vec2(texelSize.x, -texelSize.y)).rgb;
-        rgbSW = texture(floatColor2, uv + vec2(-texelSize.x, texelSize.y)).rgb;
-        rgbSE = texture(floatColor2, uv + vec2(texelSize.x, texelSize.y)).rgb;
-        
-        lumaNW = fxaaLuma(rgbNW);
-        lumaNE = fxaaLuma(rgbNE);
-        lumaSW = fxaaLuma(rgbSW);
-        lumaSE = fxaaLuma(rgbSE);
-    }
-    
-    // Enhanced edge detection
-    float edgeHorz = abs(lumaN + lumaS - 2.0 * lumaM) * 2.0 + 
-                   abs(lumaN - lumaM) + abs(lumaS - lumaM);
-    float edgeVert = abs(lumaW + lumaE - 2.0 * lumaM) * 2.0 + 
-                   abs(lumaW - lumaM) + abs(lumaE - lumaM);
-    
-    if (useExtendedSampling) {
-        edgeHorz += abs(lumaNW + lumaSW - 2.0 * lumaW) + abs(lumaNE + lumaSE - 2.0 * lumaE);
-        edgeVert += abs(lumaNW + lumaNE - 2.0 * lumaN) + abs(lumaSW + lumaSE - 2.0 * lumaS);
-    }
-    
-    bool isHorizontal = edgeHorz >= edgeVert;
-    
-    // Multi-sample blur for higher quality
-    vec3 blendColor = rgbM;
-    if (sampleCount <= 4) {
-        // Simple 2-tap blur
-        vec2 blendOffset = isHorizontal ? vec2(0.0, texelSize.y) : vec2(texelSize.x, 0.0);
-        blendColor = (texture(floatColor2, uv + blendOffset).rgb + 
-                      texture(floatColor2, uv - blendOffset).rgb) * 0.5;
-    } else {
-        // Multi-tap blur for higher quality
-        vec2 blendDir = isHorizontal ? vec2(0.0, texelSize.y) : vec2(texelSize.x, 0.0);
-        
-        // 3-tap blur
-        if (sampleCount <= 8) {
-            blendColor = (texture(floatColor2, uv + blendDir).rgb + 
-                         texture(floatColor2, uv).rgb +
-                         texture(floatColor2, uv - blendDir).rgb) / 3.0;
-        } else {
-            // 5-tap blur for maximum quality
-            blendColor = (texture(floatColor2, uv + blendDir * 2.0).rgb +
-                         texture(floatColor2, uv + blendDir).rgb + 
-                         texture(floatColor2, uv).rgb +
-                         texture(floatColor2, uv - blendDir).rgb +
-                         texture(floatColor2, uv - blendDir * 2.0).rgb) / 5.0;
-        }
-    }
-    
-    // Adaptive blend based on edge strength
-    float edgeStrength = lumaRange / lumaMax;
-    float adaptiveBlend = subpixelQuality * smoothstep(0.0, 1.0, edgeStrength);
-    
-    return mix(rgbM, blendColor, adaptiveBlend);
+
+    vec2 direction;
+    direction.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
+    direction.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
+
+    float neighborhoodLuma =
+        (lumaN + lumaS + lumaW + lumaE + lumaNW + lumaNE + lumaSW + lumaSE) * 0.125;
+    float directionReduce =
+        max(neighborhoodLuma * mix(0.060, 0.025, strength), 1.0 / 256.0);
+    float inverseDirection =
+        1.0 / (min(abs(direction.x), abs(direction.y)) + directionReduce);
+    float span = mix(6.0, 10.0, strength);
+    direction = clamp(direction * inverseDirection, vec2(-span), vec2(span)) * texelSize;
+
+    vec3 rgbA = 0.5 * (
+        texture(floatColor2, uv + direction * (1.0 / 3.0 - 0.5)).rgb +
+        texture(floatColor2, uv + direction * (2.0 / 3.0 - 0.5)).rgb);
+    vec3 rgbB = rgbA * 0.5 + 0.25 * (
+        texture(floatColor2, uv + direction * -0.5).rgb +
+        texture(floatColor2, uv + direction *  0.5).rgb);
+
+    float lumaB = fxaaLuma(rgbB);
+    vec3 directionalResult = (lumaB < lumaMin || lumaB > lumaMax) ? rgbA : rgbB;
+
+    // Sub-pixel coverage removes small stair steps and shimmering that the directional
+    // search alone can miss. Preserve detail by blending only on confirmed edges.
+    float subpixel = clamp(abs(neighborhoodLuma - lumaM) / max(lumaRange, 1.0e-5), 0.0, 1.0);
+    subpixel = subpixel * subpixel * (3.0 - 2.0 * subpixel);
+    float coverage = max(mix(0.62, 0.92, strength),
+                         subpixel * mix(0.70, 0.95, strength));
+    return mix(rgbM, directionalResult, coverage);
 }
 
 vec3 applyChromaticAberrationOrFXAA(vec2 uv) {
