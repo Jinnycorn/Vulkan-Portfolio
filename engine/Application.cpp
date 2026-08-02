@@ -912,6 +912,28 @@ void Application::updateGui()
         renderer_->setOcclusionCullingEnabled(occlusionCullingEnabled);
     }
 
+    bool lodEnabled = renderer_->isLodEnabled();
+    if (ImGui::Checkbox("Automatic Distance LOD", &lodEnabled)) {
+        renderer_->setLodEnabled(lodEnabled);
+    }
+
+    float lod1Pixels = renderer_->lod1PixelThreshold();
+    float lod2Pixels = renderer_->lod2PixelThreshold();
+    float lodCullPixels = renderer_->lodCullPixelThreshold();
+    bool lodThresholdChanged = false;
+    lodThresholdChanged |=
+        ImGui::SliderFloat("LOD 1 radius", &lod1Pixels, 48.0f, 240.0f, "%.0f px");
+    lodThresholdChanged |=
+        ImGui::SliderFloat("LOD 2 radius", &lod2Pixels, 12.0f, 120.0f, "%.0f px");
+    lodThresholdChanged |=
+        ImGui::SliderFloat("Tiny object cutoff", &lodCullPixels, 0.25f, 8.0f, "%.2f px");
+    if (lodThresholdChanged) {
+        lod1Pixels = std::max(lod1Pixels, lod2Pixels + 1.0f);
+        lod2Pixels = std::max(lod2Pixels, lodCullPixels + 1.0f);
+        renderer_->setLodThresholds(lod1Pixels, lod2Pixels, lodCullPixels);
+    }
+    ImGui::TextDisabled("LOD uses projected size, so it adapts to distance and FOV.");
+
     // Back-face culling is baked into the PBR and shadow pipelines.
     ImGui::TextDisabled("Back-face Culling: Enabled");
 
@@ -920,6 +942,8 @@ void Application::updateGui()
     ImGui::Text("  Total Meshes: %u", stats.totalMeshes);
     ImGui::Text("  Frustum Culled: %u", stats.culledMeshes);
     ImGui::Text("  Occlusion Culled: %u", stats.occlusionCulledMeshes);
+    ImGui::Text("  LOD 1 / LOD 2: %u / %u", stats.lod1Meshes, stats.lod2Meshes);
+    ImGui::Text("  LOD Tiny Culled: %u", stats.lodCulledMeshes);
     ImGui::Text("  Frustum Visible: %u", stats.renderedMeshes);
 
     if (stats.totalMeshes > 0) {
@@ -1035,6 +1059,8 @@ void Application::renderQualityControlPanel()
 
         switch (level) {
         case 0:
+            renderer_->setLodEnabled(true);
+            renderer_->setLodThresholds(140.0f, 48.0f, 3.0f);
             options.shadowOn = 0;
             options.specularWeight = 0.04f;
             options.diffuseWeight = 1.0f;
@@ -1050,6 +1076,8 @@ void Application::renderQualityControlPanel()
             sky.environmentIntensity = 1.0f;
             break;
         case 1:
+            renderer_->setLodEnabled(true);
+            renderer_->setLodThresholds(115.0f, 38.0f, 2.0f);
             options.shadowOn = 1;
             options.specularWeight = 0.05f;
             options.diffuseWeight = 1.0f;
@@ -1065,6 +1093,8 @@ void Application::renderQualityControlPanel()
             sky.environmentIntensity = 1.0f;
             break;
         case 2:
+            renderer_->setLodEnabled(true);
+            renderer_->setLodThresholds(85.0f, 26.0f, 1.0f);
             options.shadowOn = 1;
             options.specularWeight = 0.06f;
             options.diffuseWeight = 1.05f;
@@ -1080,6 +1110,8 @@ void Application::renderQualityControlPanel()
             sky.environmentIntensity = 1.1f;
             break;
         default:
+            renderer_->setLodEnabled(true);
+            renderer_->setLodThresholds(60.0f, 16.0f, 0.5f);
             options.shadowOn = 1;
             options.specularWeight = 0.08f;
             options.diffuseWeight = 1.1f;
@@ -1149,6 +1181,7 @@ void Application::renderQualityControlPanel()
     ImGui::BulletText("512px material textures");
     ImGui::BulletText("75%% internal render scale");
     ImGui::BulletText("1024px shadow allocation");
+    ImGui::BulletText("3-level automatic screen-space LOD");
 }
 
 void Application::renderHDRControlWindow()
