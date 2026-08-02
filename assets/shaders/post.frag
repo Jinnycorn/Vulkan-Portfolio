@@ -29,6 +29,12 @@ layout (set = 0, binding = 1) uniform PostProcessingOptions {
     float debugSplit;           // Split position for comparison (0.0-1.0)
     int showOnlyChannel;        // 0=All, 1=Red, 2=Green, 3=Blue, 4=Alpha, 5=Luminance
     float padding1;             // Bokeh DOF parameters: focusDistance + aperture + bokehIntensity encoded
+
+    // NIS-style spatial upscaling controls. Kept in this UBO to avoid another descriptor set.
+    int nisEnabled;
+    float nisSharpness;
+    float nisScaleThreshold;
+    float nisPadding;
 } postOptions;
 
 // Add depth buffer access for Bokeh effect
@@ -195,6 +201,104 @@ vec3 addFilmGrain(vec3 color, vec2 uv) {
     return color + noise;
 }
 
+// ===== NVIDIA IMAGE SCALING STYLE SPATIAL UPSCALER =====
+//
+// This low-VRAM Vulkan path follows the public NIS design principles: a six-tap
+// directional reconstruction filter followed by contrast-adaptive sharpening.
+// It is integrated into the existing fragment post pass to avoid allocating a
+// second full-resolution storage image on 2 GB GPUs.
+float nisLuma(vec3 color) {
+    float linearLuma = dot(max(color, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+    return linearLuma / (1.0 + linearLuma);
+}
+
+float nisSinc(float x) {
+    const float pi = 3.14159265358979323846;
+    if (abs(x) < 1.0e-4) {
+        return 1.0;
+    }
+    float pix = pi * x;
+    return sin(pix) / pix;
+}
+
+float nisSixTapWeight(float distanceFromCenter) {
+    float x = abs(distanceFromCenter);
+    if (x >= 3.0) {
+        return 0.0;
+    }
+    // Six-tap Lanczos reconstruction is used as a compact phase filter. Direction
+    // selection below prevents the filter from unnecessarily crossing strong edges.
+    return nisSinc(distanceFromCenter) * nisSinc(distanceFromCenter / 3.0);
+}
+
+bool nisUpscalingActive() {
+    if (postOptions.nisEnabled == 0) {
+        return false;
+    }
+
+    vec2 inputSize = vec2(textureSize(floatColor2, 0));
+    vec2 outputSize = 1.0 / max(fwidth(inTexCoord), vec2(1.0e-6));
+    vec2 enlargement = outputSize / max(inputSize, vec2(1.0));
+    return max(enlargement.x, enlargement.y) >= postOptions.nisScaleThreshold;
+}
+
+vec3 nisSpatialUpscale(vec2 uv) {
+    vec2 inputSize = vec2(textureSize(floatColor2, 0));
+    vec2 texel = 1.0 / inputSize;
+
+    vec3 center = texture(floatColor2, uv).rgb;
+    vec3 north  = texture(floatColor2, uv + vec2(0.0, -texel.y)).rgb;
+    vec3 south  = texture(floatColor2, uv + vec2(0.0,  texel.y)).rgb;
+    vec3 west   = texture(floatColor2, uv + vec2(-texel.x, 0.0)).rgb;
+    vec3 east   = texture(floatColor2, uv + vec2( texel.x, 0.0)).rgb;
+
+    float gradientX = abs(nisLuma(east) - nisLuma(west));
+    float gradientY = abs(nisLuma(south) - nisLuma(north));
+
+    // Reconstruct along the detected edge tangent. Vertical edges therefore use
+    // vertical taps and horizontal edges use horizontal taps, reducing edge blur.
+    vec2 axis = gradientX > gradientY ? vec2(0.0, 1.0) : vec2(1.0, 0.0);
+    vec2 sourcePosition = uv * inputSize - vec2(0.5);
+    float phase = axis.x > 0.5 ? fract(sourcePosition.x) : fract(sourcePosition.y);
+
+    vec2 phaseOrigin = uv;
+    if (axis.x > 0.5) {
+        phaseOrigin.x = (floor(sourcePosition.x) + 0.5) / inputSize.x;
+    } else {
+        phaseOrigin.y = (floor(sourcePosition.y) + 0.5) / inputSize.y;
+    }
+
+    vec3 reconstructed = vec3(0.0);
+    float totalWeight = 0.0;
+    for (int tap = -2; tap <= 3; ++tap) {
+        float weight = nisSixTapWeight(float(tap) - phase);
+        vec2 sampleUv = clamp(phaseOrigin + axis * float(tap) * texel,
+                              vec2(0.5) * texel, vec2(1.0) - vec2(0.5) * texel);
+        reconstructed += texture(floatColor2, sampleUv).rgb * weight;
+        totalWeight += weight;
+    }
+    reconstructed /= max(totalWeight, 1.0e-5);
+
+    // NIS-style contrast-adaptive unsharp mask. The clamp limits halos and ringing
+    // around Bistro roof lines, window frames and high-contrast UI-adjacent edges.
+    vec3 localBlur = (north + south + west + east) * 0.25;
+    float minLuma = min(nisLuma(center),
+                        min(min(nisLuma(north), nisLuma(south)),
+                            min(nisLuma(west), nisLuma(east))));
+    float maxLuma = max(nisLuma(center),
+                        max(max(nisLuma(north), nisLuma(south)),
+                            max(nisLuma(west), nisLuma(east))));
+    float localContrast = (maxLuma - minLuma) / max(maxLuma, 0.05);
+    float edgeConfidence = smoothstep(0.015, 0.22, localContrast);
+    float sharpenAmount = clamp(postOptions.nisSharpness, 0.0, 1.0) * edgeConfidence;
+
+    vec3 sharpened = reconstructed + (reconstructed - localBlur) * sharpenAmount;
+    vec3 localMin = min(center, min(min(north, south), min(west, east)));
+    vec3 localMax = max(center, max(max(north, south), max(west, east)));
+    vec3 localRange = max(localMax - localMin, vec3(1.0e-4));
+    return clamp(sharpened, localMin - localRange * 0.06, localMax + localRange * 0.06);
+}
+
 // ===== ADVANCED FXAA IMPLEMENTATION =====
 
 float fxaaLuma(vec3 rgb) {
@@ -277,6 +381,12 @@ vec3 fxaaAdvanced(vec2 uv, float fxaaStrength) {
 }
 
 vec3 applyChromaticAberrationOrFXAA(vec2 uv) {
+    // NVScaler already combines spatial reconstruction and sharpening. Avoid stacking
+    // the multi-tap FXAA path while upscaling, which would blur the reconstructed edge.
+    if (nisUpscalingActive()) {
+        return nisSpatialUpscale(uv);
+    }
+
     if (postOptions.chromaticAberration > 1.0) {
         // FXAA mode: values 1.0-2.0 map directly to smoothing strength 0.0-1.0.
         float fxaaStrength = postOptions.chromaticAberration - 1.0;
