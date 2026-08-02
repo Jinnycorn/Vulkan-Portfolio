@@ -948,7 +948,8 @@ void Application::updateGui()
 
     if (stats.totalMeshes > 0) {
         const uint32_t totalCulled =
-            std::min(stats.totalMeshes, stats.culledMeshes + stats.occlusionCulledMeshes);
+            std::min(stats.totalMeshes, stats.culledMeshes + stats.occlusionCulledMeshes +
+                                            stats.lodCulledMeshes);
         float cullingPercentage =
             (float(totalCulled) / float(stats.totalMeshes)) * 100.0f;
         ImGui::Text("  Total Culled: %.1f%%", cullingPercentage);
