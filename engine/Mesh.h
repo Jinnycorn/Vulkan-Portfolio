@@ -37,7 +37,7 @@ class Mesh
             lodIndexCounts_[i] = other.lodIndexCounts_[i];
             lodIndexOffsets_[i] = other.lodIndexOffsets_[i];
         }
-    {
+
         // Reset moved-from object to safe state
         other.vertexBuffer_ = VK_NULL_HANDLE;
         other.vertexMemory_ = VK_NULL_HANDLE;
