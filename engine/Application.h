@@ -246,6 +246,9 @@ class Application
     float gizmoScaleSnap_{0.1f};
     bool pendingViewportPick_{false};
     glm::vec2 pendingViewportPickPosition_{0.0f};
+    bool viewportLeftPressed_{false};
+    bool viewportLeftDragging_{false};
+    glm::vec2 viewportLeftPressPosition_{0.0f};
 
     GuiRenderer guiRenderer_;
     unique_ptr<Renderer> renderer_;
