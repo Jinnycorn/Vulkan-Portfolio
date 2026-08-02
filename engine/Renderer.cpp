@@ -371,9 +371,14 @@ void Renderer::draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swap
 {
     TRACY_CPU_SCOPE("Renderer::draw");
 
+    const float lodReferenceHeight = std::max(1.0f, viewport.height);
+
     const bool periodicOcclusionRetest =
         (renderFrameCounter_ % kOcclusionRetestInterval) == 0;
     cullingStats_.occlusionCulledMeshes = 0;
+    cullingStats_.lod1Meshes = 0;
+    cullingStats_.lod2Meshes = 0;
+    cullingStats_.lodCulledMeshes = 0;
 
     if (occlusionCullingEnabled_ && occlusionQueryPool_ != VK_NULL_HANDLE) {
         const uint32_t queryBase = currentFrame * meshQueryCount_;
@@ -534,6 +539,7 @@ void Renderer::draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swap
                             Mesh* mesh;
                             size_t queryMeshIndex;
                             float distanceSquared;
+                            uint32_t lodLevel;
                         };
 
                         vector<DrawItem> drawItems;
@@ -564,9 +570,40 @@ void Renderer::draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swap
 
                                 const glm::vec3 toMesh =
                                     mesh.worldBounds.getCenter() - sceneUBO_.cameraPos;
-                                drawItems.push_back(
-                                    {models[j].get(), &mesh, queryMeshIndex,
-                                     glm::dot(toMesh, toMesh)});
+                                const float distanceSquared = glm::dot(toMesh, toMesh);
+                                uint32_t lodLevel = 0;
+
+                                if (lodEnabled_ && !models[j]->hasBones()) {
+                                    const float distance =
+                                        std::sqrt(std::max(distanceSquared, 0.0001f));
+                                    const float worldRadius =
+                                        glm::length(mesh.worldBounds.getExtents());
+                                    const float projectedRadiusPixels =
+                                        worldRadius * lodReferenceHeight / distance;
+
+                                    if (projectedRadiusPixels < lodCullPixelThreshold_) {
+                                        if (pipelineName == "pbrDeferred") {
+                                            ++cullingStats_.lodCulledMeshes;
+                                        }
+                                        continue;
+                                    }
+                                    if (projectedRadiusPixels < lod2PixelThreshold_) {
+                                        lodLevel = 2;
+                                    } else if (projectedRadiusPixels < lod1PixelThreshold_) {
+                                        lodLevel = 1;
+                                    }
+                                }
+
+                                if (pipelineName == "pbrDeferred") {
+                                    if (lodLevel == 1) {
+                                        ++cullingStats_.lod1Meshes;
+                                    } else if (lodLevel == 2) {
+                                        ++cullingStats_.lod2Meshes;
+                                    }
+                                }
+
+                                drawItems.push_back({models[j].get(), &mesh, queryMeshIndex,
+                                                     distanceSquared, lodLevel});
                             }
                         }
 
@@ -592,8 +629,11 @@ void Renderer::draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swap
                                                0, sizeof(PbrPushConstants), &pushConstants);
 
                             vkCmdBindVertexBuffers(cmd, 0, 1, &item.mesh->vertexBuffer_, offsets);
-                            vkCmdBindIndexBuffer(cmd, item.mesh->indexBuffer_, 0,
+                            vkCmdBindIndexBuffer(cmd, item.mesh->indexBuffer_,
+                                                 item.mesh->lodIndexOffset(item.lodLevel),
                                                  VK_INDEX_TYPE_UINT32);
+                            const uint32_t lodIndexCount =
+                                item.mesh->lodIndexCount(item.lodLevel);
 
                             const bool issueOcclusionQuery =
                                 pipelineName == "pbrDeferred" && occlusionCullingEnabled_ &&
@@ -604,15 +644,11 @@ void Renderer::draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swap
                                     currentFrame * meshQueryCount_ +
                                     static_cast<uint32_t>(item.queryMeshIndex);
                                 vkCmdBeginQuery(cmd, occlusionQueryPool_, query, 0);
-                                vkCmdDrawIndexed(
-                                    cmd, static_cast<uint32_t>(item.mesh->indices_.size()), 1, 0, 0,
-                                    0);
+                                vkCmdDrawIndexed(cmd, lodIndexCount, 1, 0, 0, 0);
                                 vkCmdEndQuery(cmd, occlusionQueryPool_, query);
                                 occlusionQueryIssued_[currentFrame][item.queryMeshIndex] = 1;
                             } else {
-                                vkCmdDrawIndexed(
-                                    cmd, static_cast<uint32_t>(item.mesh->indices_.size()), 1, 0, 0,
-                                    0);
+                                vkCmdDrawIndexed(cmd, lodIndexCount, 1, 0, 0, 0);
                             }
                         }
 
