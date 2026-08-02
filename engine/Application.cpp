@@ -1102,6 +1102,46 @@ void Application::renderAssetEditorPanel()
     }
     ImGui::EndChild();
 
+    const float layoutButtonWidth =
+        std::max(90.0f, (ImGui::GetContentRegionAvail().x - 8.0f) * 0.5f);
+    if (ImGui::Button("Save Layout", ImVec2(layoutButtonWidth, 0.0f))) {
+        std::ofstream output("BistroScene.layout", std::ios::trunc);
+        if (output) {
+            output << "HLAB_SCENE_LAYOUT_V1\n" << meshes.size() << '\n';
+            for (const auto& mesh : meshes) {
+                output << (mesh.editorVisible ? 1 : 0);
+                const float* matrix = glm::value_ptr(mesh.editorTransform);
+                for (int component = 0; component < 16; ++component) {
+                    output << ' ' << matrix[component];
+                }
+                output << '\n';
+            }
+            printLog("Saved asset layout to BistroScene.layout");
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Load Layout", ImVec2(layoutButtonWidth, 0.0f))) {
+        std::ifstream input("BistroScene.layout");
+        string header;
+        size_t meshCount = 0;
+        if (input >> header >> meshCount && header == "HLAB_SCENE_LAYOUT_V1" &&
+            meshCount == meshes.size()) {
+            for (auto& mesh : meshes) {
+                int visible = 1;
+                input >> visible;
+                float* matrix = glm::value_ptr(mesh.editorTransform);
+                for (int component = 0; component < 16; ++component) {
+                    input >> matrix[component];
+                }
+                mesh.editorVisible = visible != 0;
+                mesh.editorTransformDirty = true;
+            }
+            printLog("Loaded asset layout from BistroScene.layout");
+        } else {
+            printLog("BistroScene.layout is missing or does not match the loaded model");
+        }
+    }
+
     if (ImGui::Button("Restore All Removed", ImVec2(-1.0f, 0.0f))) {
         for (auto& mesh : meshes) {
             mesh.editorVisible = true;
