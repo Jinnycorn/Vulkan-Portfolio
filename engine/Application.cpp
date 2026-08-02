@@ -375,10 +375,72 @@ void Application::setupCallbacks()
         app->camera_.translate(glm::vec3(0.0f, 0.0f, (float)yoffset * 0.05f));
     });
 
-    // Add framebuffer size callback
     window_.setFramebufferSizeCallback([](GLFWwindow* window, int width, int height) {
-        exitWithMessage("Window resize not implemented");
+        auto* app = static_cast<Application*>(glfwGetWindowUserPointer(window));
+        // Zero-sized framebuffers occur while minimized. Defer recreation until the
+        // window is visible again and GLFW reports its final maximized/restored size.
+        app->framebufferResized_ = true;
     });
+}
+
+void Application::recreateSwapchain()
+{
+    const VkExtent2D newSize = window_.getFramebufferSize();
+    if (newSize.width == 0 || newSize.height == 0 || !renderer_) {
+        return;
+    }
+
+    ctx_.waitIdle();
+
+    // Preserve the user's runtime quality choices across maximize, restore and resize.
+    const OptionsUniform options = renderer_->optionsUBO();
+    const SkyOptionsUBO skyOptions = renderer_->skyOptionsUBO();
+    const PostOptionsUBO postOptions = renderer_->postOptionsUBO();
+    const SsaoOptionsUBO ssaoOptions = renderer_->ssaoOptionsUBO();
+    const bool frustumCulling = renderer_->isFrustumCullingEnabled();
+    const bool occlusionCulling = renderer_->isOcclusionCullingEnabled();
+    const bool lodEnabled = renderer_->isLodEnabled();
+    const float lod1Threshold = renderer_->lod1PixelThreshold();
+    const float lod2Threshold = renderer_->lod2PixelThreshold();
+    const float lodCullThreshold = renderer_->lodCullPixelThreshold();
+
+    // Renderer-owned attachments reference the old dimensions, so release them before
+    // replacing the swapchain images.
+    renderer_.reset();
+
+    for (VkSemaphore semaphore : renderDoneSemaphores_) {
+        vkDestroySemaphore(ctx_.device(), semaphore, nullptr);
+    }
+    renderDoneSemaphores_.clear();
+
+    windowSize_ = newSize;
+    swapchain_.create(windowSize_, false);
+
+    renderDoneSemaphores_.resize(swapchain_.images().size());
+    for (VkSemaphore& semaphore : renderDoneSemaphores_) {
+        VkSemaphoreCreateInfo semaphoreInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+        check(vkCreateSemaphore(ctx_.device(), &semaphoreInfo, nullptr, &semaphore));
+    }
+
+    renderer_ = std::make_unique<Renderer>(
+        ctx_, shaderManager_, kMaxFramesInFlight, kAssetsPathPrefix, kShaderPathPrefix, models_,
+        swapchain_.colorFormat(), ctx_.depthFormat(), windowSize_.width, windowSize_.height);
+
+    renderer_->optionsUBO() = options;
+    renderer_->skyOptionsUBO() = skyOptions;
+    renderer_->postOptionsUBO() = postOptions;
+    renderer_->ssaoOptionsUBO() = ssaoOptions;
+    renderer_->setFrustumCullingEnabled(frustumCulling);
+    renderer_->setOcclusionCullingEnabled(occlusionCulling);
+    renderer_->setLodEnabled(lodEnabled);
+    renderer_->setLodThresholds(lod1Threshold, lod2Threshold, lodCullThreshold);
+
+    const float aspectRatio = float(windowSize_.width) / float(windowSize_.height);
+    camera_.setPerspective(camera_.fov, aspectRatio, camera_.znear, camera_.zfar);
+    guiRenderer_.resize(windowSize_.width, windowSize_.height);
+
+    framebufferResized_ = false;
+    printLog("Window render area resized to {}x{}", windowSize_.width, windowSize_.height);
 }
 
 Application::~Application()
@@ -424,6 +486,15 @@ void Application::run()
         {
             TRACY_CPU_SCOPE("Window Poll Events");
             window_.pollEvents();
+        }
+
+        if (framebufferResized_) {
+            recreateSwapchain();
+            // Keep polling while minimized; recreation completes after restore.
+            if (framebufferResized_) {
+                continue;
+            }
+            continue;
         }
 
         // NEW: Calculate delta time for smooth animation
@@ -532,7 +603,6 @@ void Application::run()
         {
             TRACY_CPU_SCOPE("Fence Wait");
             check(vkWaitForFences(ctx_.device(), 1, &waitFences_[currentFrame], VK_TRUE, UINT64_MAX));
-            check(vkResetFences(ctx_.device(), 1, &waitFences_[currentFrame]));
         }
 
         {
@@ -556,9 +626,13 @@ void Application::run()
         }
 
         if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-            continue; // Ignore resize in this example
+            framebufferResized_ = true;
+            continue;
         } else if ((result != VK_SUCCESS) && (result != VK_SUBOPTIMAL_KHR)) {
             exitWithMessage("Could not acquire the next swap chain image!");
+        }
+        if (result == VK_SUBOPTIMAL_KHR) {
+            framebufferResized_ = true;
         }
 
         // Use currentFrame index (CPU-side command buffer)
@@ -659,6 +733,9 @@ void Application::run()
 
         {
             TRACY_CPU_SCOPE("GPU Submit");
+            // Reset only when this frame is guaranteed to submit. Resetting before an
+            // out-of-date acquire would leave the fence permanently unsignaled.
+            check(vkResetFences(ctx_.device(), 1, &waitFences_[currentFrame]));
             check(vkQueueSubmit(cmd.queue(), 1, &submitInfo, waitFences_[currentFrame]));
         }
 
@@ -672,7 +749,14 @@ void Application::run()
 
         {
             TRACY_CPU_SCOPE("Present");
-            check(vkQueuePresentKHR(ctx_.graphicsQueue(), &presentInfo));
+            const VkResult presentResult =
+                vkQueuePresentKHR(ctx_.graphicsQueue(), &presentInfo);
+            if (presentResult == VK_ERROR_OUT_OF_DATE_KHR ||
+                presentResult == VK_SUBOPTIMAL_KHR) {
+                framebufferResized_ = true;
+            } else {
+                check(presentResult);
+            }
         }
 
         currentFrame = (currentFrame + 1) % kMaxFramesInFlight;
