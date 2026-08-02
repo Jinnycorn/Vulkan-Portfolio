@@ -304,6 +304,18 @@ void Application::setupCallbacks()
             switch (button) {
             case GLFW_MOUSE_BUTTON_LEFT:
                 app->mouseState_.buttons.left = true;
+                if (app->showUi_ && !ImGui::GetIO().WantCaptureMouse &&
+                    !ImGuizmo::IsOver()) {
+                    const float inspectorWidth =
+                        std::clamp(float(app->windowSize_.width) * 0.30f, 340.0f, 410.0f);
+                    constexpr float assetPanelHeight = 310.0f;
+                    if (float(xpos) < float(app->windowSize_.width) - inspectorWidth &&
+                        float(ypos) < float(app->windowSize_.height) - assetPanelHeight) {
+                        app->pendingViewportPick_ = true;
+                        app->pendingViewportPickPosition_ =
+                            glm::vec2(float(xpos), float(ypos));
+                    }
+                }
                 break;
             case GLFW_MOUSE_BUTTON_RIGHT:
                 app->mouseState_.buttons.right = true;
@@ -689,6 +701,11 @@ void Application::updateGui()
         ImGuizmo::BeginFrame();
     }
 
+    if (pendingViewportPick_) {
+        pickAssetAtViewport(pendingViewportPickPosition_.x, pendingViewportPickPosition_.y);
+        pendingViewportPick_ = false;
+    }
+
     if (!showUi_) {
         ImGui::Render();
         return;
@@ -958,8 +975,6 @@ void Application::updateGui()
         ImGui::Text("  Total Culled: %.1f%%", cullingPercentage);
     }
 
-    renderAssetEditorPanel();
-
     ImGui::Separator();
 
     for (uint32_t i = 0; i < models_.size(); i++) {
@@ -1032,6 +1047,7 @@ void Application::updateGui()
     ImGui::End();
     ImGui::PopStyleVar();
 
+    renderAssetEditorPanel();
     renderSelectedAssetGizmo();
 
     {
@@ -1240,8 +1256,9 @@ void Application::renderSelectedAssetGizmo()
 
     const float panelWidth =
         std::clamp(float(windowSize_.width) * 0.30f, 340.0f, 410.0f);
+    constexpr float assetPanelHeight = 310.0f;
     ImGuizmo::SetRect(0.0f, 0.0f, float(windowSize_.width) - panelWidth,
-                      float(windowSize_.height));
+                      float(windowSize_.height) - assetPanelHeight);
 
     ImGuizmo::OPERATION operation = ImGuizmo::TRANSLATE;
     if (gizmoOperation_ == 1) {
@@ -2004,7 +2021,7 @@ void Application::handleMouseMove(int32_t x, int32_t y)
     int32_t dx = (int32_t)mouseState_.position.x - x;
     int32_t dy = (int32_t)mouseState_.position.y - y;
 
-    if (mouseState_.buttons.left) {
+    if (mouseState_.buttons.left && !showUi_) {
         camera_.rotate(glm::vec3(-dy * camera_.rotationSpeed, -dx * camera_.rotationSpeed, 0.0f));
     }
 
