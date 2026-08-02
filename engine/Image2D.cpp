@@ -54,13 +54,68 @@ auto Image2D::height() const -> uint32_t
 }
 
 void Image2D::createFromPixelData(unsigned char* pixelData, int width, int height,
-                                  int channels, bool sRGB)
+                                  int channels, bool sRGB, uint32_t maxTextureDimension)
 {
     if (pixelData == nullptr) {
         exitWithMessage("Pixel data must not be nullptr for Image creation.");
     }
     if (channels != 4 || width <= 0 || height <= 0) {
         exitWithMessage("Unsupported image data: {}x{}, {} channels", width, height, channels);
+    }
+
+    // Every sampled asset texture is capped at 1024px for the 2 GB MX110 target.
+    // Render targets use createImage directly and are intentionally unaffected.
+    constexpr uint32_t kGlobalTextureLimit = 1024;
+    const uint32_t effectiveLimit =
+        maxTextureDimension == 0 ? kGlobalTextureLimit
+                                 : std::min(maxTextureDimension, kGlobalTextureLimit);
+    vector<unsigned char> cappedPixels;
+    if (width > static_cast<int>(effectiveLimit) ||
+        height > static_cast<int>(effectiveLimit)) {
+        const int sourceWidth = width;
+        const int sourceHeight = height;
+        const unsigned char* sourcePixels = pixelData;
+        const float scale =
+            std::min(float(effectiveLimit) / float(sourceWidth),
+                     float(effectiveLimit) / float(sourceHeight));
+        width = std::max(1, static_cast<int>(std::round(sourceWidth * scale)));
+        height = std::max(1, static_cast<int>(std::round(sourceHeight * scale)));
+        cappedPixels.resize(static_cast<size_t>(width) * height * channels);
+
+        for (int y = 0; y < height; ++y) {
+            float sourceY = (float(y) + 0.5f) * sourceHeight / height - 0.5f;
+            sourceY = std::clamp(sourceY, 0.0f, float(sourceHeight - 1));
+            const int y0 = static_cast<int>(std::floor(sourceY));
+            const int y1 = std::min(y0 + 1, sourceHeight - 1);
+            const float fy = sourceY - float(y0);
+
+            for (int x = 0; x < width; ++x) {
+                float sourceX = (float(x) + 0.5f) * sourceWidth / width - 0.5f;
+                sourceX = std::clamp(sourceX, 0.0f, float(sourceWidth - 1));
+                const int x0 = static_cast<int>(std::floor(sourceX));
+                const int x1 = std::min(x0 + 1, sourceWidth - 1);
+                const float fx = sourceX - float(x0);
+
+                for (int channel = 0; channel < channels; ++channel) {
+                    const float top =
+                        sourcePixels[(y0 * sourceWidth + x0) * channels + channel] *
+                            (1.0f - fx) +
+                        sourcePixels[(y0 * sourceWidth + x1) * channels + channel] * fx;
+                    const float bottom =
+                        sourcePixels[(y1 * sourceWidth + x0) * channels + channel] *
+                            (1.0f - fx) +
+                        sourcePixels[(y1 * sourceWidth + x1) * channels + channel] * fx;
+                    cappedPixels[(y * width + x) * channels + channel] =
+                        static_cast<unsigned char>(
+                            std::clamp(top * (1.0f - fy) + bottom * fy, 0.0f, 255.0f) +
+                            0.5f);
+                }
+            }
+        }
+
+        pixelData = cappedPixels.data();
+        printLog("Runtime texture capped: {}x{} -> {}x{}", sourceWidth, sourceHeight,
+                 width, height);
     }
 
     const VkFormat format = sRGB ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
@@ -385,6 +440,12 @@ void Image2D::createTextureFromImage(string filename, bool isCubemap, bool sRGB,
         exitWithMessage("Failed to load image texture: {} ({})", filename,
                         string(stbi_failure_reason()));
     }
+
+    // Zero previously meant unlimited. The runtime now uses a global 1024px ceiling.
+    constexpr uint32_t kGlobalTextureLimit = 1024;
+    maxTextureDimension =
+        maxTextureDimension == 0 ? kGlobalTextureLimit
+                                 : std::min(maxTextureDimension, kGlobalTextureLimit);
 
     int uploadWidth = width;
     int uploadHeight = height;
