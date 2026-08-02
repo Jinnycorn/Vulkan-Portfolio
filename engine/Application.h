@@ -246,9 +246,9 @@ class Application
     float gizmoScaleSnap_{0.1f};
     bool pendingViewportPick_{false};
     glm::vec2 pendingViewportPickPosition_{0.0f};
-    // The exact local-space surface point hit by viewport picking. Bistro meshes can
-    // contain widely separated geometry, so their aggregate AABB center is not a
-    // reliable visual pivot.
+    // Preferred local-space pivot for the current viewport selection. Normally this
+    // is the asset bounds center; material-batched Bistro geometry falls back to the
+    // clicked surface when its aggregate center is visually unrelated.
     glm::vec3 selectedGizmoPivotLocal_{0.0f};
     bool selectedGizmoPivotValid_{false};
     bool viewportLeftPressed_{false};
