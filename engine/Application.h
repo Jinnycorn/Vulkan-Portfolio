@@ -244,6 +244,8 @@ class Application
     float gizmoTranslationSnap_{0.25f};
     float gizmoRotationSnap_{5.0f};
     float gizmoScaleSnap_{0.1f};
+    bool pendingViewportPick_{false};
+    glm::vec2 pendingViewportPickPosition_{0.0f};
 
     GuiRenderer guiRenderer_;
     unique_ptr<Renderer> renderer_;
@@ -273,6 +275,7 @@ class Application
 
     void renderAssetEditorPanel();
     void renderSelectedAssetGizmo();
+    void pickAssetAtViewport(float mouseX, float mouseY);
     void renderQualityControlPanel();
     void renderHDRControlWindow();
     void renderPostProcessingControlWindow();
