@@ -996,6 +996,15 @@ void Renderer::resize(uint32_t swapchainWidth, uint32_t swapchainHeight)
         }
         descriptorSets_[setName].create(
             ctx_, pipelines_[pipelineName]->layouts()[0], resources);
+
+        // Pipeline caches raw descriptor handles separately from DescriptorSet objects.
+        // Refresh that cache after allocation so no freed image view remains reachable.
+        vector<vector<reference_wrapper<DescriptorSet>>> pipelineSets(kMaxFramesInFlight_);
+        for (auto& frameSets : pipelineSets) {
+            frameSets.emplace_back(std::ref(descriptorSets_[setName]));
+        }
+        pipelines_[pipelineName]->setDescriptorSets(pipelineSets);
+        pipelines_[pipelineName]->refreshComputeDimensions();
     };
     recreateImageSet("deferredLighting", "deferredLightingData");
     recreateImageSet("post", "postProcessing");
