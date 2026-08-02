@@ -143,6 +143,33 @@ class Mesh
     bool editorVisible{true};
     bool editorTransformDirty{true};
 
+    glm::vec3 editorPivot() const
+    {
+        return (minBounds + maxBounds) * 0.5f;
+    }
+
+    glm::mat4 editorPivotMatrix() const
+    {
+        glm::mat4 pivot(1.0f);
+        pivot[3] = glm::vec4(editorPivot(), 1.0f);
+        return pivot;
+    }
+
+    // Vertices in Bistro submeshes are authored in scene-like coordinates. Sandwich
+    // the edit delta around the mesh bounds center so rotation and scale use the
+    // selected asset itself instead of the OBJ scene origin.
+    glm::mat4 editorRenderTransform() const
+    {
+        glm::mat4 inversePivot(1.0f);
+        inversePivot[3] = glm::vec4(-editorPivot(), 1.0f);
+        return editorPivotMatrix() * editorTransform * inversePivot;
+    }
+
+    glm::mat4 editorGizmoTransform() const
+    {
+        return editorPivotMatrix() * editorTransform;
+    }
+
     // Binary file I/O methods
     bool readFromBinaryFileStream(std::ifstream& stream);
     bool writeToBinaryFileStream(std::ofstream& stream) const;
