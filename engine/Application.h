@@ -219,6 +219,7 @@ class Application
     Swapchain swapchain_;
 
     VkExtent2D windowSize_{};
+    bool framebufferResized_{false};
 
     MouseState mouseState_;
     Camera camera_;
@@ -277,6 +278,7 @@ class Application
     void loadModels(const vector<ModelConfig>& modelConfigs);
     void setupCallbacks();
     void initializeVulkanResources();
+    void recreateSwapchain();
 
     // FPS calculation method
     void updatePerformanceMetrics(float deltaTime);
