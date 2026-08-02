@@ -105,7 +105,7 @@ try {
     if ($Example -eq "Ex14_Bistro") {
         $env:HLAB_DISABLE_IBL = "1"
         $env:HLAB_LOW_SPEC = "1"
-        Write-Host "Hybrid texture mode enabled: 50% at 2048px and 50% at 1024px with full LOD0 geometry."
+        Write-Host "Low-VRAM texture mode enabled: all runtime textures capped at 1024px with full LOD0 geometry."
     }
     Write-Host "Running $Example on the selected Vulkan GPU ..."
     & $exe
