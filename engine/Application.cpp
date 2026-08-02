@@ -1157,7 +1157,7 @@ void Application::renderAssetEditorPanel()
     if (ImGui::Button("Save Layout", ImVec2(smallButtonWidth, 0.0f))) {
         std::ofstream output("BistroScene.layout", std::ios::trunc);
         if (output) {
-            output << "HLAB_SCENE_LAYOUT_V1\n" << meshes.size() << '\n';
+            output << "HLAB_SCENE_LAYOUT_V2\n" << meshes.size() << '\n';
             for (const auto& mesh : meshes) {
                 output << (mesh.editorVisible ? 1 : 0);
                 const float* matrix = glm::value_ptr(mesh.editorTransform);
@@ -1174,7 +1174,7 @@ void Application::renderAssetEditorPanel()
         std::ifstream input("BistroScene.layout");
         string header;
         size_t meshCount = 0;
-        if (input >> header >> meshCount && header == "HLAB_SCENE_LAYOUT_V1" &&
+        if (input >> header >> meshCount && header == "HLAB_SCENE_LAYOUT_V2" &&
             meshCount == meshes.size()) {
             for (auto& mesh : meshes) {
                 int visible = 1;
@@ -1382,7 +1382,8 @@ void Application::pickAssetAtViewport(float mouseX, float mouseY)
 
         auto& model = *models_[candidate.modelIndex];
         auto& mesh = model.meshes()[candidate.meshIndex];
-        const glm::mat4 worldMatrix = model.modelMatrix() * mesh.editorTransform;
+        const glm::mat4 worldMatrix =
+            model.modelMatrix() * mesh.editorRenderTransform();
         const glm::mat4 inverseWorld = glm::inverse(worldMatrix);
         const glm::vec3 localOrigin =
             glm::vec3(inverseWorld * glm::vec4(rayOrigin, 1.0f));
@@ -1482,12 +1483,13 @@ void Application::renderSelectedAssetGizmo()
                                                   : gizmoScaleSnap_;
     snap[0] = snap[1] = snap[2] = snapValue;
 
-    glm::mat4 worldTransform = model.modelMatrix() * mesh.editorTransform;
+    glm::mat4 worldTransform = model.modelMatrix() * mesh.editorGizmoTransform();
     if (ImGuizmo::Manipulate(glm::value_ptr(camera_.matrices.view),
                              glm::value_ptr(camera_.matrices.perspective), operation, mode,
                              glm::value_ptr(worldTransform), nullptr,
                              gizmoSnapEnabled_ ? snap : nullptr)) {
-        mesh.editorTransform = glm::inverse(model.modelMatrix()) * worldTransform;
+        mesh.editorTransform =
+            glm::inverse(model.modelMatrix() * mesh.editorPivotMatrix()) * worldTransform;
         mesh.editorTransformDirty = true;
     }
 }
