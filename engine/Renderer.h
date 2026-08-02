@@ -285,9 +285,9 @@ class Renderer
     static constexpr uint32_t kOcclusionRetestInterval = 8;
 
     bool lodEnabled_{true};
-    float lod1PixelThreshold_{120.0f};
-    float lod2PixelThreshold_{42.0f};
-    float lodCullPixelThreshold_{2.5f};
+    float lod1PixelThreshold_{110.0f};
+    float lod2PixelThreshold_{36.0f};
+    float lodCullPixelThreshold_{2.0f};
 
     void createOcclusionResources(const vector<unique_ptr<Model>>& models);
     void resolveOcclusionQueries(uint32_t currentFrame);
