@@ -392,22 +392,6 @@ void Application::recreateSwapchain()
 
     ctx_.waitIdle();
 
-    // Preserve the user's runtime quality choices across maximize, restore and resize.
-    const OptionsUniform options = renderer_->optionsUBO();
-    const SkyOptionsUBO skyOptions = renderer_->skyOptionsUBO();
-    const PostOptionsUBO postOptions = renderer_->postOptionsUBO();
-    const SsaoOptionsUBO ssaoOptions = renderer_->ssaoOptionsUBO();
-    const bool frustumCulling = renderer_->isFrustumCullingEnabled();
-    const bool occlusionCulling = renderer_->isOcclusionCullingEnabled();
-    const bool lodEnabled = renderer_->isLodEnabled();
-    const float lod1Threshold = renderer_->lod1PixelThreshold();
-    const float lod2Threshold = renderer_->lod2PixelThreshold();
-    const float lodCullThreshold = renderer_->lodCullPixelThreshold();
-
-    // Renderer-owned attachments reference the old dimensions, so release them before
-    // replacing the swapchain images.
-    renderer_.reset();
-
     for (VkSemaphore semaphore : renderDoneSemaphores_) {
         vkDestroySemaphore(ctx_.device(), semaphore, nullptr);
     }
@@ -422,18 +406,9 @@ void Application::recreateSwapchain()
         check(vkCreateSemaphore(ctx_.device(), &semaphoreInfo, nullptr, &semaphore));
     }
 
-    renderer_ = std::make_unique<Renderer>(
-        ctx_, shaderManager_, kMaxFramesInFlight, kAssetsPathPrefix, kShaderPathPrefix, models_,
-        swapchain_.colorFormat(), ctx_.depthFormat(), windowSize_.width, windowSize_.height);
-
-    renderer_->optionsUBO() = options;
-    renderer_->skyOptionsUBO() = skyOptions;
-    renderer_->postOptionsUBO() = postOptions;
-    renderer_->ssaoOptionsUBO() = ssaoOptions;
-    renderer_->setFrustumCullingEnabled(frustumCulling);
-    renderer_->setOcclusionCullingEnabled(occlusionCulling);
-    renderer_->setLodEnabled(lodEnabled);
-    renderer_->setLodThresholds(lod1Threshold, lod2Threshold, lodCullThreshold);
+    // Keep model/material resources alive. Only screen-sized render attachments and
+    // the descriptor sets that reference them need new Vulkan handles.
+    renderer_->resize(windowSize_.width, windowSize_.height);
 
     const float aspectRatio = float(windowSize_.width) / float(windowSize_.height);
     camera_.setPerspective(camera_.fov, aspectRatio, camera_.znear, camera_.zfar);
