@@ -1579,7 +1579,7 @@ void Application::renderQualityControlPanel()
 
     const char* names[] = {"Optimized", "Balanced", "High", "Showcase"};
     const char* descriptions[] = {
-        "Maximum stability for MX110. Shadows and costly AA are disabled.",
+        "Maximum stability for MX110. Shadows are disabled; efficient FXAA stays active.",
         "Enables 1024px shadows, 8-sample SSAO and fast FXAA.",
         "Uses 16-sample SSAO, ACES tone mapping and balanced FXAA.",
         "Best runtime quality: 32-sample SSAO and quality FXAA."
@@ -1611,7 +1611,7 @@ void Application::renderQualityControlPanel()
             post.exposure = 1.0f;
             post.contrast = 1.0f;
             post.saturation = 1.0f;
-            post.chromaticAberration = 1.85f;
+            post.chromaticAberration = 1.55f;
             post.vignetteStrength = 0.0f;
             sky.environmentIntensity = 1.0f;
             break;
@@ -1645,7 +1645,7 @@ void Application::renderQualityControlPanel()
             post.exposure = 1.05f;
             post.contrast = 1.03f;
             post.saturation = 1.04f;
-            post.chromaticAberration = 1.55f;
+            post.chromaticAberration = 1.85f;
             post.vignetteStrength = 0.04f;
             sky.environmentIntensity = 1.1f;
             break;
