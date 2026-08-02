@@ -1061,7 +1061,7 @@ void Application::renderQualityControlPanel()
         switch (level) {
         case 0:
             renderer_->setLodEnabled(true);
-            renderer_->setLodThresholds(140.0f, 48.0f, 3.0f);
+            renderer_->setLodThresholds(115.0f, 38.0f, 2.0f);
             options.shadowOn = 0;
             options.specularWeight = 0.04f;
             options.diffuseWeight = 1.0f;
@@ -1078,7 +1078,7 @@ void Application::renderQualityControlPanel()
             break;
         case 1:
             renderer_->setLodEnabled(true);
-            renderer_->setLodThresholds(115.0f, 38.0f, 2.0f);
+            renderer_->setLodThresholds(95.0f, 30.0f, 1.5f);
             options.shadowOn = 1;
             options.specularWeight = 0.05f;
             options.diffuseWeight = 1.0f;
@@ -1095,7 +1095,7 @@ void Application::renderQualityControlPanel()
             break;
         case 2:
             renderer_->setLodEnabled(true);
-            renderer_->setLodThresholds(85.0f, 26.0f, 1.0f);
+            renderer_->setLodThresholds(75.0f, 22.0f, 0.75f);
             options.shadowOn = 1;
             options.specularWeight = 0.06f;
             options.diffuseWeight = 1.05f;
@@ -1112,7 +1112,7 @@ void Application::renderQualityControlPanel()
             break;
         default:
             renderer_->setLodEnabled(true);
-            renderer_->setLodThresholds(60.0f, 16.0f, 0.5f);
+            renderer_->setLodThresholds(50.0f, 12.0f, 0.25f);
             options.shadowOn = 1;
             options.specularWeight = 0.08f;
             options.diffuseWeight = 1.1f;
@@ -1179,7 +1179,7 @@ void Application::renderQualityControlPanel()
 
     ImGui::Spacing();
     ImGui::TextDisabled("Base resources remain VRAM-safe:");
-    ImGui::BulletText("512px material textures");
+    ImGui::BulletText("1024px material textures");
     ImGui::BulletText("75%% internal render scale");
     ImGui::BulletText("1024px shadow allocation");
     ImGui::BulletText("3-level automatic screen-space LOD");
