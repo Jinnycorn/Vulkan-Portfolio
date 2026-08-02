@@ -304,6 +304,8 @@ void Application::setupCallbacks()
             switch (button) {
             case GLFW_MOUSE_BUTTON_LEFT:
                 app->mouseState_.buttons.left = true;
+                app->viewportLeftPressed_ = false;
+                app->viewportLeftDragging_ = false;
                 if (app->showUi_ && !ImGui::GetIO().WantCaptureMouse &&
                     !ImGuizmo::IsOver()) {
                     const float inspectorWidth =
@@ -311,8 +313,8 @@ void Application::setupCallbacks()
                     constexpr float assetPanelHeight = 310.0f;
                     if (float(xpos) < float(app->windowSize_.width) - inspectorWidth &&
                         float(ypos) < float(app->windowSize_.height) - assetPanelHeight) {
-                        app->pendingViewportPick_ = true;
-                        app->pendingViewportPickPosition_ =
+                        app->viewportLeftPressed_ = true;
+                        app->viewportLeftPressPosition_ =
                             glm::vec2(float(xpos), float(ypos));
                     }
                 }
@@ -328,6 +330,14 @@ void Application::setupCallbacks()
             switch (button) {
             case GLFW_MOUSE_BUTTON_LEFT:
                 app->mouseState_.buttons.left = false;
+                if (app->viewportLeftPressed_ && !app->viewportLeftDragging_ &&
+                    !ImGuizmo::IsOver() && !ImGuizmo::IsUsing()) {
+                    app->pendingViewportPick_ = true;
+                    app->pendingViewportPickPosition_ =
+                        glm::vec2(float(xpos), float(ypos));
+                }
+                app->viewportLeftPressed_ = false;
+                app->viewportLeftDragging_ = false;
                 break;
             case GLFW_MOUSE_BUTTON_RIGHT:
                 app->mouseState_.buttons.right = false;
@@ -1075,7 +1085,7 @@ void Application::renderAssetEditorPanel()
     ImGui::TextColored(ImVec4(0.37f, 0.68f, 1.0f, 1.0f), "ASSET MANAGER");
     ImGui::SameLine();
     ImGui::TextDisabled(
-        "Left click viewport to select  |  Right/Middle drag camera  |  Gizmo to edit");
+        "Click select  |  Left drag orbit  |  Right dolly  |  Middle pan  |  Gizmo edit");
     ImGui::Separator();
 
     if (models_.empty()) {
@@ -2219,8 +2229,21 @@ void Application::handleMouseMove(int32_t x, int32_t y)
     int32_t dx = (int32_t)mouseState_.position.x - x;
     int32_t dy = (int32_t)mouseState_.position.y - y;
 
-    if (mouseState_.buttons.left && !showUi_) {
-        camera_.rotate(glm::vec3(-dy * camera_.rotationSpeed, -dx * camera_.rotationSpeed, 0.0f));
+    if (mouseState_.buttons.left) {
+        bool rotateCamera = !showUi_;
+        if (showUi_ && viewportLeftPressed_) {
+            const glm::vec2 dragDelta =
+                glm::vec2(float(x), float(y)) - viewportLeftPressPosition_;
+            if (glm::dot(dragDelta, dragDelta) > 16.0f) {
+                viewportLeftDragging_ = true;
+            }
+            rotateCamera = viewportLeftDragging_ && !ImGuizmo::IsUsing();
+        }
+
+        if (rotateCamera) {
+            camera_.rotate(
+                glm::vec3(-dy * camera_.rotationSpeed, -dx * camera_.rotationSpeed, 0.0f));
+        }
     }
 
     if (mouseState_.buttons.right) {
