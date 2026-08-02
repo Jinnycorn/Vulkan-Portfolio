@@ -557,7 +557,8 @@ void Renderer::draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swap
                                 const size_t queryMeshIndex = globalMeshIndex++;
                                 totalMeshCount++;
 
-                                if (!models[j]->visible() || mesh.isCulled) {
+                                if (!models[j]->visible() || !mesh.editorVisible ||
+                                    mesh.isCulled) {
                                     continue;
                                 }
 
@@ -623,7 +624,8 @@ void Renderer::draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swap
                         const size_t visibleMeshCount = drawItems.size();
                         for (const DrawItem& item : drawItems) {
                             PbrPushConstants pushConstants;
-                            pushConstants.model = item.model->modelMatrix();
+                            pushConstants.model =
+                                item.model->modelMatrix() * item.mesh->editorTransform;
                             pushConstants.materialIndex = item.mesh->materialIndex_;
                             memcpy(pushConstants.coeffs, item.model->coeffs(),
                                    sizeof(pushConstants.coeffs));
@@ -1131,14 +1133,16 @@ void Renderer::updateWorldBounds(vector<unique_ptr<Model>>& models)
         auto& model = models[modelIndex];
         const glm::mat4& modelMatrix = model->modelMatrix();
 
-        // Bistro is static in normal use. Recompute thousands of AABBs only when its transform
-        // actually changes through the UI.
-        if (worldBoundsValid_[modelIndex] && cachedModelMatrices_[modelIndex] == modelMatrix) {
-            continue;
-        }
+        const bool modelTransformChanged =
+            !worldBoundsValid_[modelIndex] || cachedModelMatrices_[modelIndex] != modelMatrix;
 
+        // Static meshes keep their cached AABBs. A gizmo edit only invalidates the
+        // selected mesh instead of rebuilding all 3,000+ Bistro bounds.
         for (auto& mesh : model->meshes()) {
-            mesh.updateWorldBounds(modelMatrix);
+            if (modelTransformChanged || mesh.editorTransformDirty) {
+                mesh.updateWorldBounds(modelMatrix * mesh.editorTransform);
+                mesh.editorTransformDirty = false;
+            }
         }
 
         cachedModelMatrices_[modelIndex] = modelMatrix;
