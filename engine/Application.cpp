@@ -1641,10 +1641,10 @@ void Application::renderQualityControlPanel()
 
     const char* names[] = {"Optimized", "Balanced", "High", "Showcase"};
     const char* descriptions[] = {
-        "Maximum stability for MX110. Shadows are disabled; efficient FXAA stays active.",
-        "Enables 1024px shadows, 8-sample SSAO and fast FXAA.",
-        "Uses 16-sample SSAO, ACES tone mapping and balanced FXAA.",
-        "Best runtime quality: 32-sample SSAO and quality FXAA."
+        "Maximum stability for MX110. Shadows off, NIS sharpness 0.25.",
+        "1024px shadows, 8-sample SSAO and NIS sharpness 0.35.",
+        "16-sample SSAO, ACES tone mapping and NIS sharpness 0.45.",
+        "32-sample SSAO, quality FXAA fallback and NIS sharpness 0.55."
     };
 
     auto applyPreset = [&](int level) {
@@ -1674,6 +1674,8 @@ void Application::renderQualityControlPanel()
             post.contrast = 1.0f;
             post.saturation = 1.0f;
             post.chromaticAberration = 1.55f;
+            post.nisEnabled = 1;
+            post.nisSharpness = 0.25f;
             post.vignetteStrength = 0.0f;
             sky.environmentIntensity = 1.0f;
             break;
@@ -1691,6 +1693,8 @@ void Application::renderQualityControlPanel()
             post.contrast = 1.0f;
             post.saturation = 1.0f;
             post.chromaticAberration = 1.70f;
+            post.nisEnabled = 1;
+            post.nisSharpness = 0.35f;
             post.vignetteStrength = 0.0f;
             sky.environmentIntensity = 1.0f;
             break;
@@ -1708,6 +1712,8 @@ void Application::renderQualityControlPanel()
             post.contrast = 1.03f;
             post.saturation = 1.04f;
             post.chromaticAberration = 1.85f;
+            post.nisEnabled = 1;
+            post.nisSharpness = 0.45f;
             post.vignetteStrength = 0.04f;
             sky.environmentIntensity = 1.1f;
             break;
@@ -1725,6 +1731,8 @@ void Application::renderQualityControlPanel()
             post.contrast = 1.06f;
             post.saturation = 1.06f;
             post.chromaticAberration = 2.00f;
+            post.nisEnabled = 1;
+            post.nisSharpness = 0.55f;
             post.vignetteStrength = 0.08f;
             post.vignetteRadius = 0.9f;
             sky.environmentIntensity = 1.2f;
