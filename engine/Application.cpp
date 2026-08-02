@@ -1611,7 +1611,7 @@ void Application::renderQualityControlPanel()
             post.exposure = 1.0f;
             post.contrast = 1.0f;
             post.saturation = 1.0f;
-            post.chromaticAberration = 0.0f;
+            post.chromaticAberration = 1.85f;
             post.vignetteStrength = 0.0f;
             sky.environmentIntensity = 1.0f;
             break;
@@ -1628,7 +1628,7 @@ void Application::renderQualityControlPanel()
             post.exposure = 1.0f;
             post.contrast = 1.0f;
             post.saturation = 1.0f;
-            post.chromaticAberration = 1.25f;
+            post.chromaticAberration = 1.70f;
             post.vignetteStrength = 0.0f;
             sky.environmentIntensity = 1.0f;
             break;
@@ -1662,7 +1662,7 @@ void Application::renderQualityControlPanel()
             post.exposure = 1.1f;
             post.contrast = 1.06f;
             post.saturation = 1.06f;
-            post.chromaticAberration = 1.79f;
+            post.chromaticAberration = 2.00f;
             post.vignetteStrength = 0.08f;
             post.vignetteRadius = 0.9f;
             sky.environmentIntensity = 1.2f;
@@ -1880,46 +1880,26 @@ void Application::renderPostProcessingControlWindow()
                                   "1.0 = Maximum smoothing, lower performance");
             }
 
-            // Advanced Quality Control
             ImGui::Separator();
-            ImGui::Text("Advanced FXAA Quality:");
+            ImGui::Text("FXAA Quality Presets:");
 
-            // Extract quality level from fractional part
-            float baseStrength = std::floor(fxaaStrength * 10.0f) / 10.0f;
-            float qualityLevel = (fxaaStrength - baseStrength) * 10.0f;
-
-            // Quality presets with encoded settings
             if (ImGui::Button("Fast##fxaa")) {
-                chromAberr = 1.25f; // 0.25 strength, 0.0 quality (4 samples)
+                chromAberr = 1.35f;
             }
             ImGui::SameLine();
             if (ImGui::Button("Balanced##fxaa")) {
-                chromAberr = 1.55f; // 0.5 strength, 0.5 quality (8 samples)
+                chromAberr = 1.65f;
             }
             ImGui::SameLine();
             if (ImGui::Button("Quality##fxaa")) {
-                chromAberr = 1.79f; // 0.7 strength, 0.9 quality (12 samples)
+                chromAberr = 1.95f;
             }
 
-            // Quality level slider (affects sample count and edge detection)
-            float newQualityLevel = qualityLevel;
-            if (ImGui::SliderFloat("Sample Quality", &newQualityLevel, 0.0f, 1.0f, "%.2f")) {
-                chromAberr = 1.0f + baseStrength + (newQualityLevel * 0.1f);
-            }
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Controls FXAA sample count and edge detection quality\n"
-                                  "0.0 = 4 samples, basic edge detection\n"
-                                  "0.5 = 8 samples, enhanced edge detection\n"
-                                  "1.0 = 12 samples, premium edge detection");
-            }
-
-            // Real-time quality information
-            int estimatedSamples = int(4.0f + qualityLevel * 8.0f);
-            bool extendedSampling = qualityLevel > 0.5f;
             ImGui::Text("Current Settings:");
-            ImGui::BulletText("Sample Count: %d", estimatedSamples);
-            ImGui::BulletText("Edge Detection: %s", extendedSampling ? "Enhanced" : "Basic");
-            ImGui::BulletText("Performance Cost: ~%.1f%%", (2.0f + qualityLevel * 3.0f));
+            ImGui::BulletText("Directional samples: 9 + adaptive search");
+            ImGui::BulletText("Edge sensitivity: %.0f%%", fxaaStrength * 100.0f);
+            ImGui::BulletText("Sub-pixel smoothing: Enabled");
+            ImGui::BulletText("Performance Cost: ~3-6%%");
 
         } else if (chromEnabled) {
             if (ImGui::SliderFloat("Aberration Strength", &chromAberr, 0.0f, 1.0f, "%.3f")) {
