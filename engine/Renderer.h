@@ -77,7 +77,7 @@ struct PostOptionsUBO
     alignas(4) float vignetteStrength = 0.0f;    // Vignette effect strength
     alignas(4) float vignetteRadius = 0.8f;      // Vignette radius
     alignas(4) float filmGrainStrength = 0.0f;   // Film grain effect
-    alignas(4) float chromaticAberration = 0.0f; // Chromatic aberration
+    alignas(4) float chromaticAberration = 1.65f; // FXAA enabled by default (0.65 strength)
 
     // Debug options
     alignas(4) int debugMode = 0;       // Debug visualization mode
