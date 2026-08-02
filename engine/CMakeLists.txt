@@ -1,3 +1,5 @@
+find_package(imguizmo CONFIG REQUIRED)
+
 # Engine static library
 add_library(Engine STATIC
     Animation.cpp
@@ -132,6 +134,8 @@ endif()
 if(TARGET imgui::imgui)
     target_link_libraries(Engine PUBLIC imgui::imgui)
 endif()
+
+target_link_libraries(Engine PUBLIC imguizmo::imguizmo)
 
 # Handle spirv-reflect with multiple possible target names
 if(TARGET unofficial::spirv-reflect)
