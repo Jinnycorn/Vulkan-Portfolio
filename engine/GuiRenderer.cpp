@@ -69,6 +69,20 @@ GuiRenderer::GuiRenderer(Context& ctx, ShaderManager& shaderManager, VkFormat co
     colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.16f, 0.23f, 0.33f, 1.00f);
     colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.23f, 0.34f, 0.48f, 1.00f);
 
+    // Keep the same visual hierarchy while making the complete editor palette
+    // substantially calmer. Alpha is preserved so panel transparency is unchanged.
+    for (int colorIndex = 0; colorIndex < ImGuiCol_COUNT; ++colorIndex) {
+        float hue = 0.0f;
+        float saturation = 0.0f;
+        float value = 0.0f;
+        ImGui::ColorConvertRGBtoHSV(colors[colorIndex].x, colors[colorIndex].y,
+                                    colors[colorIndex].z, hue, saturation, value);
+        saturation *= 0.50f;
+        value *= 0.50f;
+        ImGui::ColorConvertHSVtoRGB(hue, saturation, value, colors[colorIndex].x,
+                                    colors[colorIndex].y, colors[colorIndex].z);
+    }
+
     style.ScaleAllSizes(scale_);
     ImGuiIO& io = ImGui::GetIO();
     io.FontGlobalScale = scale_;
