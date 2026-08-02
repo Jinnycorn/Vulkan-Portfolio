@@ -105,7 +105,7 @@ try {
     if ($Example -eq "Ex14_Bistro") {
         $env:HLAB_DISABLE_IBL = "1"
         $env:HLAB_LOW_SPEC = "1"
-        Write-Host "Original assets enabled: full-resolution materials and full LOD0 geometry. Other MX110-safe effects remain active."
+        Write-Host "High-detail mode enabled: material textures capped at 2048px with full LOD0 geometry."
     }
     Write-Host "Running $Example on the selected Vulkan GPU ..."
     & $exe
