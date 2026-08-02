@@ -9,13 +9,79 @@
 #include <fstream>
 #include <glm/glm.hpp>
 #include <iostream>
+#include <unordered_map>
 
 namespace hlab {
 
 void Mesh::createBuffers(Context& ctx)
 {
-    VkDeviceSize vertexBufferSize = sizeof(vertices_[0]) * vertices_.size();
-    VkDeviceSize indexBufferSize = sizeof(indices_[0]) * indices_.size();
+    calculateBounds();
+
+    // Build two topology-preserving index LODs by clustering nearby vertices.
+    // The original vertex buffer is shared by all levels, keeping VRAM overhead low.
+    auto buildClusteredIndices = [&](uint32_t gridResolution) {
+        vector<uint32_t> result;
+        result.reserve(indices_.size());
+
+        const vec3 extent = glm::max(maxBounds - minBounds, vec3(0.0001f));
+        unordered_map<uint64_t, uint32_t> representative;
+        representative.reserve(vertices_.size());
+
+        auto representativeIndex = [&](uint32_t sourceIndex) {
+            const Vertex& vertex = vertices_[sourceIndex];
+            const vec3 normalized = glm::clamp((vertex.getPosition() - minBounds) / extent,
+                                               vec3(0.0f), vec3(0.999999f));
+            const uvec3 cell = uvec3(normalized * float(gridResolution));
+            const vec3 normal = vertex.getNormal();
+            const uint64_t normalOctant = (normal.x >= 0.0f ? 1ull : 0ull) |
+                                          (normal.y >= 0.0f ? 2ull : 0ull) |
+                                          (normal.z >= 0.0f ? 4ull : 0ull);
+            const uint64_t key = uint64_t(cell.x) | (uint64_t(cell.y) << 10) |
+                                 (uint64_t(cell.z) << 20) | (normalOctant << 30);
+            auto [it, inserted] = representative.emplace(key, sourceIndex);
+            return it->second;
+        };
+
+        for (size_t i = 0; i + 2 < indices_.size(); i += 3) {
+            const uint32_t a = representativeIndex(indices_[i]);
+            const uint32_t b = representativeIndex(indices_[i + 1]);
+            const uint32_t d = representativeIndex(indices_[i + 2]);
+            if (a == b || b == d || a == d) {
+                continue;
+            }
+            result.push_back(a);
+            result.push_back(b);
+            result.push_back(d);
+        }
+
+        // Never replace a valid level with an empty buffer.
+        if (result.empty()) {
+            return indices_;
+        }
+        return result;
+    };
+
+    vector<uint32_t> lod1Indices =
+        indices_.size() >= 96 ? buildClusteredIndices(32) : indices_;
+    vector<uint32_t> lod2Indices =
+        indices_.size() >= 96 ? buildClusteredIndices(16) : lod1Indices;
+
+    vector<uint32_t> combinedIndices;
+    combinedIndices.reserve(indices_.size() + lod1Indices.size() + lod2Indices.size());
+    lodIndexOffsets_[0] = 0;
+    lodIndexCounts_[0] = static_cast<uint32_t>(indices_.size());
+    combinedIndices.insert(combinedIndices.end(), indices_.begin(), indices_.end());
+
+    lodIndexOffsets_[1] = combinedIndices.size() * sizeof(uint32_t);
+    lodIndexCounts_[1] = static_cast<uint32_t>(lod1Indices.size());
+    combinedIndices.insert(combinedIndices.end(), lod1Indices.begin(), lod1Indices.end());
+
+    lodIndexOffsets_[2] = combinedIndices.size() * sizeof(uint32_t);
+    lodIndexCounts_[2] = static_cast<uint32_t>(lod2Indices.size());
+    combinedIndices.insert(combinedIndices.end(), lod2Indices.begin(), lod2Indices.end());
+
+    const VkDeviceSize vertexBufferSize = sizeof(vertices_[0]) * vertices_.size();
+    const VkDeviceSize indexBufferSize = sizeof(uint32_t) * combinedIndices.size();
 
     VkBuffer stagingBuffer;
     VkDeviceMemory stagingBufferMemory;
@@ -43,7 +109,7 @@ void Mesh::createBuffers(Context& ctx)
     check(vkMapMemory(ctx.device(), stagingBufferMemory, 0, vertexBufferSize + indexBufferSize, 0,
                       &data));
     memcpy(data, vertices_.data(), static_cast<size_t>(vertexBufferSize));
-    memcpy(static_cast<char*>(data) + vertexBufferSize, indices_.data(),
+    memcpy(static_cast<char*>(data) + vertexBufferSize, combinedIndices.data(),
            static_cast<size_t>(indexBufferSize));
     vkUnmapMemory(ctx.device(), stagingBufferMemory);
 
@@ -86,8 +152,6 @@ void Mesh::createBuffers(Context& ctx)
 
     vkDestroyBuffer(ctx.device(), stagingBuffer, nullptr);
     vkFreeMemory(ctx.device(), stagingBufferMemory, nullptr);
-
-    calculateBounds();
 }
 
 void Mesh::calculateBounds()
