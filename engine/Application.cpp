@@ -1111,6 +1111,7 @@ void Application::renderAssetEditorPanel()
             if (ImGui::Selectable(models_[modelIndex]->name().c_str(), selected)) {
                 selectedModelIndex_ = modelIndex;
                 selectedMeshIndex_ = -1;
+                selectedGizmoPivotValid_ = false;
             }
             if (selected) {
                 ImGui::SetItemDefaultFocus();
@@ -1145,6 +1146,8 @@ void Application::renderAssetEditorPanel()
                 }
                 if (ImGui::Selectable(label.c_str(), selectedMeshIndex_ == meshIndex)) {
                     selectedMeshIndex_ = meshIndex;
+                    // List selection has no surface hit, so use the mesh bounds center.
+                    selectedGizmoPivotValid_ = false;
                 }
                 if (!mesh.editorVisible) {
                     ImGui::PopStyleColor();
@@ -1376,6 +1379,7 @@ void Application::pickAssetAtViewport(float mouseX, float mouseY)
     float closestWorldDistance = std::numeric_limits<float>::max();
     int closestModel = -1;
     int closestMesh = -1;
+    glm::vec3 closestLocalHit(0.0f);
 
     for (const auto& candidate : candidates) {
         if (candidate.aabbDistance > closestWorldDistance) {
@@ -1435,12 +1439,17 @@ void Application::pickAssetAtViewport(float mouseX, float mouseY)
                 closestWorldDistance = worldDistance;
                 closestModel = candidate.modelIndex;
                 closestMesh = candidate.meshIndex;
+                closestLocalHit = localHit;
             }
         }
     }
 
     selectedModelIndex_ = closestModel >= 0 ? closestModel : selectedModelIndex_;
     selectedMeshIndex_ = closestMesh;
+    selectedGizmoPivotValid_ = closestMesh >= 0;
+    if (selectedGizmoPivotValid_) {
+        selectedGizmoPivotLocal_ = closestLocalHit;
+    }
     if (closestMesh >= 0) {
         const auto& mesh = models_[closestModel]->meshes()[closestMesh];
         printLog("Viewport selected asset: {}",
@@ -1466,6 +1475,15 @@ void Application::renderSelectedAssetGizmo()
     }
 
     ImGuizmo::SetOrthographic(false);
+    // ImGuizmo expects an OpenGL-style projection. The renderer projection is Vulkan
+    // ZO with an explicit Y flip; feeding it to ImGuizmo flips screen Y a second time
+    // and makes the axes drift when the camera moves.
+    const float gizmoAspect =
+        float(windowSize_.width) / std::max(1.0f, float(windowSize_.height));
+    const glm::mat4 gizmoProjection =
+        glm::perspectiveRH_NO(glm::radians(camera_.fov), gizmoAspect,
+                              camera_.znear, camera_.zfar);
+
     // The scene uses the full swapchain projection. Draw the gizmo over that exact
     // rectangle on the background layer so editor panels naturally cover it.
     ImGuizmo::SetDrawlist(ImGui::GetBackgroundDrawList());
@@ -1485,22 +1503,29 @@ void Application::renderSelectedAssetGizmo()
                                                   : gizmoScaleSnap_;
     snap[0] = snap[1] = snap[2] = snapValue;
 
-    glm::mat4 worldTransform = model.modelMatrix() * mesh.editorGizmoTransform();
-
-    // Pin the gizmo origin to the actual rendered center every frame. This explicit
-    // assignment also prevents accumulated decomposition error from moving the pivot.
     const glm::mat4 renderedWorld =
         model.modelMatrix() * mesh.editorRenderTransform();
-    const glm::vec3 renderedCenter =
-        glm::vec3(renderedWorld * glm::vec4(mesh.editorPivot(), 1.0f));
-    worldTransform[3] = glm::vec4(renderedCenter, 1.0f);
+    const glm::vec3 pivotLocal =
+        selectedGizmoPivotValid_ ? selectedGizmoPivotLocal_ : mesh.editorPivot();
+
+    // Keep the axes attached to the selected geometry, never to the camera or the
+    // aggregate Bistro mesh origin. The orientation still follows the edited asset.
+    glm::mat4 worldTransform = model.modelMatrix() * mesh.editorGizmoTransform();
+    worldTransform[3] =
+        glm::vec4(glm::vec3(renderedWorld * glm::vec4(pivotLocal, 1.0f)), 1.0f);
+    const glm::mat4 originalGizmoWorld = worldTransform;
 
     if (ImGuizmo::Manipulate(glm::value_ptr(camera_.matrices.view),
-                             glm::value_ptr(camera_.matrices.perspective), operation, mode,
+                             glm::value_ptr(gizmoProjection), operation, mode,
                              glm::value_ptr(worldTransform), nullptr,
                              gizmoSnapEnabled_ ? snap : nullptr)) {
+        // Apply the gizmo's world-space delta to the complete rendered mesh transform.
+        // This keeps a click-derived pivot stable for translate, rotate and scale.
+        const glm::mat4 worldDelta = worldTransform * glm::inverse(originalGizmoWorld);
+        const glm::mat4 editedRenderedWorld = worldDelta * renderedWorld;
         mesh.editorTransform =
-            glm::inverse(model.modelMatrix() * mesh.editorPivotMatrix()) * worldTransform;
+            glm::inverse(mesh.editorPivotMatrix()) * glm::inverse(model.modelMatrix()) *
+            editedRenderedWorld * mesh.editorPivotMatrix();
         mesh.editorTransformDirty = true;
     }
 }
