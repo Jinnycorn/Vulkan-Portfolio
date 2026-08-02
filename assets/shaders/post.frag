@@ -278,8 +278,8 @@ vec3 fxaaAdvanced(vec2 uv, float fxaaStrength) {
 
 vec3 applyChromaticAberrationOrFXAA(vec2 uv) {
     if (postOptions.chromaticAberration > 1.0) {
-        // FXAA mode: chromaticAberration > 1.0 acts as FXAA strength with quality encoding
-        float fxaaStrength = postOptions.chromaticAberration - 1.0; // 1.1 = 0.1 strength, 2.0 = 1.0 strength
+        // FXAA mode: values 1.0-2.0 map directly to smoothing strength 0.0-1.0.
+        float fxaaStrength = postOptions.chromaticAberration - 1.0;
         return fxaaAdvanced(uv, clamp(fxaaStrength, 0.0, 1.0));
     } else if (postOptions.chromaticAberration > 0.0) {
         // Chromatic aberration mode: 0.0-1.0 range
