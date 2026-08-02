@@ -105,7 +105,7 @@ try {
     if ($Example -eq "Ex14_Bistro") {
         $env:HLAB_DISABLE_IBL = "1"
         $env:HLAB_LOW_SPEC = "1"
-        Write-Host "MX110 preset enabled: 256px materials, 75% internal resolution, 1024px shadows, low-cost SSAO."
+        Write-Host "MX110 preset enabled: 512px materials, 75% internal resolution, 1024px shadows, low-cost SSAO."
     }
     Write-Host "Running $Example on the selected Vulkan GPU ..."
     & $exe
