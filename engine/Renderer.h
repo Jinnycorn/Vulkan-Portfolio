@@ -119,6 +119,9 @@ struct CullingStats
     uint32_t totalMeshes = 0;
     uint32_t culledMeshes = 0;
     uint32_t occlusionCulledMeshes = 0;
+    uint32_t lod1Meshes = 0;
+    uint32_t lod2Meshes = 0;
+    uint32_t lodCulledMeshes = 0;
     uint32_t renderedMeshes = 0;
 };
 
@@ -152,6 +155,19 @@ class Renderer
     // Temporal GPU occlusion culling
     bool isOcclusionCullingEnabled() const;
     void setOcclusionCullingEnabled(bool enabled);
+
+    // Screen-space automatic LOD. Thresholds are projected mesh radii in pixels.
+    bool isLodEnabled() const { return lodEnabled_; }
+    void setLodEnabled(bool enabled) { lodEnabled_ = enabled; }
+    float lod1PixelThreshold() const { return lod1PixelThreshold_; }
+    float lod2PixelThreshold() const { return lod2PixelThreshold_; }
+    float lodCullPixelThreshold() const { return lodCullPixelThreshold_; }
+    void setLodThresholds(float lod1Pixels, float lod2Pixels, float cullPixels)
+    {
+        lod1PixelThreshold_ = lod1Pixels;
+        lod2PixelThreshold_ = lod2Pixels;
+        lodCullPixelThreshold_ = cullPixels;
+    }
 
     auto sceneUBO() -> SceneUniform&
     {
@@ -267,6 +283,11 @@ class Renderer
     bool occlusionCullingEnabled_{true};
     uint64_t renderFrameCounter_{0};
     static constexpr uint32_t kOcclusionRetestInterval = 8;
+
+    bool lodEnabled_{true};
+    float lod1PixelThreshold_{120.0f};
+    float lod2PixelThreshold_{42.0f};
+    float lodCullPixelThreshold_{2.5f};
 
     void createOcclusionResources(const vector<unique_ptr<Model>>& models);
     void resolveOcclusionQueries(uint32_t currentFrame);
