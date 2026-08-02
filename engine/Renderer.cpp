@@ -625,7 +625,7 @@ void Renderer::draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swap
                         for (const DrawItem& item : drawItems) {
                             PbrPushConstants pushConstants;
                             pushConstants.model =
-                                item.model->modelMatrix() * item.mesh->editorTransform;
+                                item.model->modelMatrix() * item.mesh->editorRenderTransform();
                             pushConstants.materialIndex = item.mesh->materialIndex_;
                             memcpy(pushConstants.coeffs, item.model->coeffs(),
                                    sizeof(pushConstants.coeffs));
@@ -1140,7 +1140,7 @@ void Renderer::updateWorldBounds(vector<unique_ptr<Model>>& models)
         // selected mesh instead of rebuilding all 3,000+ Bistro bounds.
         for (auto& mesh : model->meshes()) {
             if (modelTransformChanged || mesh.editorTransformDirty) {
-                mesh.updateWorldBounds(modelMatrix * mesh.editorTransform);
+                mesh.updateWorldBounds(modelMatrix * mesh.editorRenderTransform());
                 mesh.editorTransformDirty = false;
             }
         }
