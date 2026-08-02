@@ -310,9 +310,27 @@ void Image2D::createTextureFromKtx2(string filename, bool isCubemap)
         exitWithMessage("Failed to load KTX2 texture: {}", filename);
     }
 
-    // Get texture properties
-    uint32_t mipLevels = ktxTexture2->numLevels;
+    // Select the first existing mip whose maximum dimension is at most 1024.
+    // KTX2 stays compressed; no destructive source conversion is required.
+    constexpr uint32_t kGlobalTextureLimit = 1024;
+    const uint32_t sourceMipLevels = ktxTexture2->numLevels;
+    uint32_t sourceBaseLevel = 0;
+    while (sourceBaseLevel + 1 < sourceMipLevels &&
+           (std::max(1u, ktxTexture2->baseWidth >> sourceBaseLevel) >
+                kGlobalTextureLimit ||
+            std::max(1u, ktxTexture2->baseHeight >> sourceBaseLevel) >
+                kGlobalTextureLimit)) {
+        ++sourceBaseLevel;
+    }
+    const uint32_t mipLevels = sourceMipLevels - sourceBaseLevel;
+    const uint32_t uploadWidth = std::max(1u, ktxTexture2->baseWidth >> sourceBaseLevel);
+    const uint32_t uploadHeight = std::max(1u, ktxTexture2->baseHeight >> sourceBaseLevel);
     uint32_t layerCount = isCubemap ? 6 : 1;
+
+    if (sourceBaseLevel > 0) {
+        printLog("KTX2 runtime texture capped: {}x{} -> {}x{}", ktxTexture2->baseWidth,
+                 ktxTexture2->baseHeight, uploadWidth, uploadHeight);
+    }
 
     // Determine format from KTX2 file
     VkFormat vkFormat = ktxTexture2_GetVkFormat(ktxTexture2);
@@ -333,7 +351,7 @@ void Image2D::createTextureFromKtx2(string filename, bool isCubemap)
     VkImageCreateFlags flags = isCubemap ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
     VkImageViewType viewType = isCubemap ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D;
 
-    createImage(vkFormat, ktxTexture2->baseWidth, ktxTexture2->baseHeight, VK_SAMPLE_COUNT_1_BIT,
+    createImage(vkFormat, uploadWidth, uploadHeight, VK_SAMPLE_COUNT_1_BIT,
                 VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                 VK_IMAGE_ASPECT_COLOR_BIT, mipLevels, layerCount, flags, viewType);
 
@@ -346,21 +364,23 @@ void Image2D::createTextureFromKtx2(string filename, bool isCubemap)
     if (isCubemap) {
         // For cubemaps: iterate through faces and mip levels
         for (uint32_t face = 0; face < 6; face++) {
-            for (uint32_t level = 0; level < mipLevels; level++) {
+            for (uint32_t sourceLevel = sourceBaseLevel; sourceLevel < sourceMipLevels;
+                 sourceLevel++) {
+                const uint32_t destinationLevel = sourceLevel - sourceBaseLevel;
                 ktx_size_t offset;
                 KTX_error_code ktxResult =
-                    ktxTexture_GetImageOffset(baseTexture, level, 0, face, &offset);
+                    ktxTexture_GetImageOffset(baseTexture, sourceLevel, 0, face, &offset);
                 if (ktxResult != KTX_SUCCESS) {
                     offset = 0;
                 }
 
                 VkBufferImageCopy bufferCopyRegion{};
                 bufferCopyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-                bufferCopyRegion.imageSubresource.mipLevel = level;
+                bufferCopyRegion.imageSubresource.mipLevel = destinationLevel;
                 bufferCopyRegion.imageSubresource.baseArrayLayer = face;
                 bufferCopyRegion.imageSubresource.layerCount = 1;
-                bufferCopyRegion.imageExtent.width = max(1u, width_ >> level);
-                bufferCopyRegion.imageExtent.height = max(1u, height_ >> level);
+                bufferCopyRegion.imageExtent.width = max(1u, width_ >> destinationLevel);
+                bufferCopyRegion.imageExtent.height = max(1u, height_ >> destinationLevel);
                 bufferCopyRegion.imageExtent.depth = 1;
                 bufferCopyRegion.bufferOffset = offset;
 
@@ -369,20 +389,23 @@ void Image2D::createTextureFromKtx2(string filename, bool isCubemap)
         }
     } else {
         // For 2D textures: iterate through mip levels only
-        for (uint32_t level = 0; level < mipLevels; level++) {
+        for (uint32_t sourceLevel = sourceBaseLevel; sourceLevel < sourceMipLevels;
+             sourceLevel++) {
+            const uint32_t destinationLevel = sourceLevel - sourceBaseLevel;
             ktx_size_t offset;
-            KTX_error_code ktxResult = ktxTexture_GetImageOffset(baseTexture, level, 0, 0, &offset);
+            KTX_error_code ktxResult =
+                ktxTexture_GetImageOffset(baseTexture, sourceLevel, 0, 0, &offset);
             if (ktxResult != KTX_SUCCESS) {
                 offset = 0;
             }
 
             VkBufferImageCopy bufferCopyRegion{};
             bufferCopyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            bufferCopyRegion.imageSubresource.mipLevel = level;
+            bufferCopyRegion.imageSubresource.mipLevel = destinationLevel;
             bufferCopyRegion.imageSubresource.baseArrayLayer = 0;
             bufferCopyRegion.imageSubresource.layerCount = 1;
-            bufferCopyRegion.imageExtent.width = max(1u, width_ >> level);
-            bufferCopyRegion.imageExtent.height = max(1u, height_ >> level);
+            bufferCopyRegion.imageExtent.width = max(1u, width_ >> destinationLevel);
+            bufferCopyRegion.imageExtent.height = max(1u, height_ >> destinationLevel);
             bufferCopyRegion.imageExtent.depth = 1;
             bufferCopyRegion.bufferOffset = offset;
 
