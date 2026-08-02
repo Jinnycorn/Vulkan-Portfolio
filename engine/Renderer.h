@@ -83,7 +83,14 @@ struct PostOptionsUBO
     alignas(4) int debugMode = 0;       // Debug visualization mode
     alignas(4) int showOnlyChannel = 0; // Show specific color channel
     alignas(4) float debugSplit = 0.5f; // Split screen position for comparison
-    alignas(4) float padding1 = 0.0f;   // Alignment padding
+    alignas(4) float padding1 = 0.0f;   // Bokeh parameter packing
+
+    // Low-VRAM NVIDIA Image Scaling style spatial upscaler.
+    // It runs in the existing post pass, so it does not allocate another full-resolution image.
+    alignas(4) int nisEnabled = 1;
+    alignas(4) float nisSharpness = 0.35f;
+    alignas(4) float nisScaleThreshold = 1.01f;
+    alignas(4) float nisPadding = 0.0f;
 };
 
 struct SsaoOptionsUBO
