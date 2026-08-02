@@ -923,7 +923,87 @@ void Renderer::createTextures(uint32_t swapchainWidth, uint32_t swapchainHeight)
     }
 }
 
-// Format selection function with proper priority: float formats first, R8G8B8A8 last
+void Renderer::resize(uint32_t swapchainWidth, uint32_t swapchainHeight)
+{
+    TRACY_CPU_SCOPE("Renderer::resize");
+
+    const char* lowSpecValue = std::getenv("HLAB_LOW_SPEC");
+    const bool lowSpecMode = lowSpecValue != nullptr && string(lowSpecValue) != "0";
+    if (lowSpecMode) {
+        constexpr float kInternalRenderScale = 0.75f;
+        swapchainWidth =
+            std::max(1u, static_cast<uint32_t>(float(swapchainWidth) * kInternalRenderScale));
+        swapchainHeight =
+            std::max(1u, static_cast<uint32_t>(float(swapchainHeight) * kInternalRenderScale));
+    }
+
+    // Only screen-sized attachments are replaced. Model textures, material buffers,
+    // pipelines, IBL and shadow resources keep their ownership and valid handles.
+    const vector<string> screenImages = {
+        "depthStencil", "floatColor1", "floatColor2", "gAlbedo",
+        "gNormal", "gPosition", "gMaterial"
+    };
+    for (const string& name : screenImages) {
+        imageBuffers_[name] = std::make_unique<Image2D>(ctx_);
+    }
+
+    const VkImageUsageFlags storageUsage =
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    imageBuffers_["floatColor1"]->createImage(
+        selectedHDRFormat_, swapchainWidth, swapchainHeight, VK_SAMPLE_COUNT_1_BIT,
+        storageUsage, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, 0, VK_IMAGE_VIEW_TYPE_2D);
+    imageBuffers_["floatColor2"]->createImage(
+        selectedHDRFormat_, swapchainWidth, swapchainHeight, VK_SAMPLE_COUNT_1_BIT,
+        storageUsage, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, 0, VK_IMAGE_VIEW_TYPE_2D);
+
+    const VkImageUsageFlags gBufferUsage =
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+        VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    imageBuffers_["gAlbedo"]->createImage(
+        VK_FORMAT_R8G8B8A8_UNORM, swapchainWidth, swapchainHeight, VK_SAMPLE_COUNT_1_BIT,
+        gBufferUsage, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, 0, VK_IMAGE_VIEW_TYPE_2D);
+    imageBuffers_["gNormal"]->createImage(
+        VK_FORMAT_R16G16B16A16_SFLOAT, swapchainWidth, swapchainHeight,
+        VK_SAMPLE_COUNT_1_BIT, gBufferUsage, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, 0,
+        VK_IMAGE_VIEW_TYPE_2D);
+    imageBuffers_["gPosition"]->createImage(
+        VK_FORMAT_R16G16B16A16_SFLOAT, swapchainWidth, swapchainHeight,
+        VK_SAMPLE_COUNT_1_BIT, gBufferUsage, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, 0,
+        VK_IMAGE_VIEW_TYPE_2D);
+    imageBuffers_["gMaterial"]->createImage(
+        VK_FORMAT_R8G8B8A8_UNORM, swapchainWidth, swapchainHeight, VK_SAMPLE_COUNT_1_BIT,
+        gBufferUsage, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, 0, VK_IMAGE_VIEW_TYPE_2D);
+    imageBuffers_["depthStencil"]->createDepthBuffer(swapchainWidth, swapchainHeight);
+
+    imageBuffers_["floatColor1"]->setSampler(samplerLinearRepeat_.handle());
+    imageBuffers_["floatColor2"]->setSampler(samplerLinearRepeat_.handle());
+    imageBuffers_["gAlbedo"]->setSampler(samplerLinearClamp_.handle());
+    imageBuffers_["gNormal"]->setSampler(samplerLinearClamp_.handle());
+    imageBuffers_["gPosition"]->setSampler(samplerLinearClamp_.handle());
+    imageBuffers_["gMaterial"]->setSampler(samplerLinearClamp_.handle());
+    imageBuffers_["depthStencil"]->setSampler(samplerLinearClamp_.handle());
+
+    // Refresh only descriptor sets that reference the replaced screen images.
+    const auto bindingInfos = shaderManager_.bindingInfos();
+    auto recreateImageSet = [&](const string& pipelineName, const string& setName) {
+        const auto& bindings = bindingInfos.at(pipelineName).at(0);
+        vector<reference_wrapper<Resource>> resources;
+        resources.reserve(bindings.size());
+        for (const BindingInfo& binding : bindings) {
+            addResource(binding.resourceName, uint32_t(-1), resources);
+        }
+        descriptorSets_[setName].create(
+            ctx_, pipelines_[pipelineName]->layouts()[0], resources);
+    };
+    recreateImageSet("deferredLighting", "deferredLightingData");
+    recreateImageSet("post", "postProcessing");
+
+    printLog("Renderer screen resources resized to {}x{}", swapchainWidth, swapchainHeight);
+}
+
+// Format selection function with proper priority: float formats first, R8G8A8 last
 VkFormat Renderer::selectOptimalHDRFormat(bool needsAlpha, bool fullPrecision)
 {
     TRACY_CPU_SCOPE("Renderer::selectOptimalHDRFormat");
