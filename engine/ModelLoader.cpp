@@ -43,7 +43,7 @@ void ModelLoader::loadFromModelFile(const string& modelFilename, bool readBistro
                 model_.textures_.emplace_back(make_unique<Image2D>(model_.ctx_));
                 model_.textures_.back()->createTextureFromImage(
                     prefix + filename, false, model_.textureSRgb_[model_.textures_.size() - 1],
-                    0u);
+                    2048u);
             }
 
             // Calculate elapsed time
@@ -205,7 +205,7 @@ void ModelLoader::loadFromModelFile(const string& modelFilename, bool readBistro
 
             model_.textures_.back()->createTextureFromImage(
                 prefix + shortFilename, false, model_.textureSRgb_[model_.textures_.size() - 1],
-                0u);
+                2048u);
         }
     }
 
