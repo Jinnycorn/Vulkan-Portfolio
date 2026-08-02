@@ -108,7 +108,7 @@ Renderer::Renderer(Context& ctx, ShaderManager& shaderManager, const uint32_t& k
         ssaoOptionsUBO_.ssaoSampleCount = 4;
         ssaoOptionsUBO_.ssaoRadius = 0.075f;
         postOptionsUBO_.toneMappingType = 1;
-        postOptionsUBO_.chromaticAberration = 0.0f;
+        postOptionsUBO_.chromaticAberration = 1.55f;
         postOptionsUBO_.vignetteStrength = 0.0f;
         postOptionsUBO_.filmGrainStrength = 0.0f;
         lod1PixelThreshold_ = 115.0f;
