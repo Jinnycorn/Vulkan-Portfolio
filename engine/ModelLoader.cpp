@@ -43,7 +43,7 @@ void ModelLoader::loadFromModelFile(const string& modelFilename, bool readBistro
                 model_.textures_.emplace_back(make_unique<Image2D>(model_.ctx_));
                 model_.textures_.back()->createTextureFromImage(
                     prefix + filename, false, model_.textureSRgb_[model_.textures_.size() - 1],
-                    readBistroObj ? (model_.textures_.size() % 2 == 1 ? 2048u : 1024u) : 0u);
+                    1024u);
             }
 
             // Calculate elapsed time
@@ -122,7 +122,7 @@ void ModelLoader::loadFromModelFile(const string& modelFilename, bool readBistro
     processNode(scene->mRootNode, scene);
     model_.calculateBoundingBox();
 
-    // 안내: Bistro 모델은 파이썬 스크립트로 전처리한 저해상도 텍스쳐를 읽어들입니다.
+    // All external model textures are uploaded with a 1024px maximum dimension.
     model_.textures_.reserve(model_.textureFilenames_.size());
     for (auto& filename : model_.textureFilenames_) {
         string prefix = readBistroObj ? directory_ + "/LowRes/" : directory_ + "/";
@@ -205,7 +205,7 @@ void ModelLoader::loadFromModelFile(const string& modelFilename, bool readBistro
 
             model_.textures_.back()->createTextureFromImage(
                 prefix + shortFilename, false, model_.textureSRgb_[model_.textures_.size() - 1],
-                readBistroObj ? (model_.textures_.size() % 2 == 1 ? 2048u : 1024u) : 0u);
+                1024u);
         }
     }
 
