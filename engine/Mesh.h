@@ -31,7 +31,9 @@ class Mesh
           vertexBuffer_(other.vertexBuffer_), vertexMemory_(other.vertexMemory_),
           indexBuffer_(other.indexBuffer_), indexMemory_(other.indexMemory_),
           minBounds(other.minBounds), maxBounds(other.maxBounds), worldBounds(other.worldBounds),
-          isCulled(other.isCulled), noTextureCoords(other.noTextureCoords)
+          isCulled(other.isCulled), noTextureCoords(other.noTextureCoords),
+          editorTransform(other.editorTransform), editorVisible(other.editorVisible),
+          editorTransformDirty(other.editorTransformDirty)
     {
         for (uint32_t i = 0; i < 3; ++i) {
             lodIndexCounts_[i] = other.lodIndexCounts_[i];
@@ -75,6 +77,9 @@ class Mesh
             worldBounds = other.worldBounds;
             isCulled = other.isCulled;
             noTextureCoords = other.noTextureCoords;
+            editorTransform = other.editorTransform;
+            editorVisible = other.editorVisible;
+            editorTransformDirty = other.editorTransformDirty;
             for (uint32_t i = 0; i < 3; ++i) {
                 lodIndexCounts_[i] = other.lodIndexCounts_[i];
                 lodIndexOffsets_[i] = other.lodIndexOffsets_[i];
@@ -131,6 +136,12 @@ class Mesh
     // Check if mesh should be culled
     bool isCulled = false;
     bool noTextureCoords = false;
+
+    // Non-destructive scene editing state. This deliberately stays out of the
+    // binary model cache so every launch starts from the authored asset.
+    glm::mat4 editorTransform{1.0f};
+    bool editorVisible{true};
+    bool editorTransformDirty{true};
 
     // Binary file I/O methods
     bool readFromBinaryFileStream(std::ifstream& stream);
