@@ -23,7 +23,8 @@ class Image2D : public Resource
     Image2D& operator=(Image2D&&) = delete;
     ~Image2D();
 
-    void createFromPixelData(unsigned char* pixels, int w, int h, int c, bool sRGB);
+    void createFromPixelData(unsigned char* pixels, int w, int h, int c, bool sRGB,
+                             uint32_t maxTextureDimension = 1024);
     void createSolid(int width, int height, uint8_t rgba[4]);
     void createSolidCubemap(uint8_t rgba[4]);
     void createTextureFromKtx2(string filename, bool isCubemap);
