@@ -105,7 +105,7 @@ try {
     if ($Example -eq "Ex14_Bistro") {
         $env:HLAB_DISABLE_IBL = "1"
         $env:HLAB_LOW_SPEC = "1"
-        Write-Host "MX110 preset enabled: 1024px materials, relaxed polygon LOD, 75% internal resolution, 1024px shadows."
+        Write-Host "Original assets enabled: full-resolution materials and full LOD0 geometry. Other MX110-safe effects remain active."
     }
     Write-Host "Running $Example on the selected Vulkan GPU ..."
     & $exe
