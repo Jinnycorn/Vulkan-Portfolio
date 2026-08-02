@@ -427,17 +427,19 @@ void Application::run()
             updatePerformanceMetrics(deltaTime);
         }
 
-        {
-            TRACY_CPU_SCOPE("GUI Update");
-            updateGui();
-        }
-
+        // Update the camera before building ImGui/ImGuizmo. The renderer and gizmo
+        // must consume the exact same frame's view-projection matrices.
         {
             TRACY_CPU_SCOPE("Camera Update");
             camera_.update(deltaTime);
             renderer_->sceneUBO().projection = camera_.matrices.perspective;
             renderer_->sceneUBO().view = camera_.matrices.view;
             renderer_->sceneUBO().cameraPos = camera_.position;
+        }
+
+        {
+            TRACY_CPU_SCOPE("GUI Update");
+            updateGui();
         }
 
         {
@@ -1484,6 +1486,15 @@ void Application::renderSelectedAssetGizmo()
     snap[0] = snap[1] = snap[2] = snapValue;
 
     glm::mat4 worldTransform = model.modelMatrix() * mesh.editorGizmoTransform();
+
+    // Pin the gizmo origin to the actual rendered center every frame. This explicit
+    // assignment also prevents accumulated decomposition error from moving the pivot.
+    const glm::mat4 renderedWorld =
+        model.modelMatrix() * mesh.editorRenderTransform();
+    const glm::vec3 renderedCenter =
+        glm::vec3(renderedWorld * glm::vec4(mesh.editorPivot(), 1.0f));
+    worldTransform[3] = glm::vec4(renderedCenter, 1.0f);
+
     if (ImGuizmo::Manipulate(glm::value_ptr(camera_.matrices.view),
                              glm::value_ptr(camera_.matrices.perspective), operation, mode,
                              glm::value_ptr(worldTransform), nullptr,
