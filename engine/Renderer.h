@@ -137,6 +137,7 @@ class Renderer
 
     void createPipelines(const VkFormat colorFormat, const VkFormat depthFormat);
     void createTextures(uint32_t swapchainWidth, uint32_t swapchainHeight);
+    void resize(uint32_t swapchainWidth, uint32_t swapchainHeight);
     void createUniformBuffers();
     void update(Camera& camera, vector<unique_ptr<Model>>& models, uint32_t currentFrame,
                 double time);
