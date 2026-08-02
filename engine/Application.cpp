@@ -1036,7 +1036,7 @@ void Application::updateGui()
 // ADD: HDR Control window method (based on Ex10_Example)
 void Application::renderQualityControlPanel()
 {
-    static int qualityLevel = 0;
+    static int qualityLevel = -1;
 
     const char* names[] = {"Optimized", "Balanced", "High", "Showcase"};
     const char* descriptions[] = {
@@ -1132,7 +1132,11 @@ void Application::renderQualityControlPanel()
     };
 
     ImGui::Text("Runtime Quality Ladder");
-    ImGui::TextDisabled("Start low, then raise one step while watching FPS and GPU time.");
+    if (qualityLevel < 0) {
+        ImGui::TextColored(ImVec4(0.37f, 0.68f, 1.0f, 1.0f),
+                           "STARTUP  Original LOD0 geometry");
+    }
+    ImGui::TextDisabled("Selecting a preset re-enables automatic polygon LOD.");
     ImGui::Spacing();
 
     for (int level = 0; level < 4; ++level) {
