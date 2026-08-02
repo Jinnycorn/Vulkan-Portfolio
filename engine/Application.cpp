@@ -15,6 +15,22 @@
 
 namespace hlab {
 
+namespace {
+ImVec4 subduedUiColor(float red, float green, float blue, float alpha)
+{
+    float hue = 0.0f;
+    float saturation = 0.0f;
+    float value = 0.0f;
+    ImGui::ColorConvertRGBtoHSV(red, green, blue, hue, saturation, value);
+    saturation *= 0.50f;
+    value *= 0.50f;
+
+    ImVec4 result(0.0f, 0.0f, 0.0f, alpha);
+    ImGui::ColorConvertHSVtoRGB(hue, saturation, value, result.x, result.y, result.z);
+    return result;
+}
+} // namespace
+
 // Default constructor - uses hardcoded configuration
 Application::Application() : Application(ApplicationConfig::createDefault())
 {
@@ -733,7 +749,7 @@ void Application::updateGui()
         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoTitleBar;
     ImGui::Begin("##PortfolioInspector", nullptr, inspectorFlags);
 
-    ImGui::TextColored(ImVec4(0.37f, 0.68f, 1.0f, 1.0f), "VULKAN PORTFOLIO");
+    ImGui::TextColored(subduedUiColor(0.37f, 0.68f, 1.0f, 1.0f), "VULKAN PORTFOLIO");
     ImGui::SameLine();
     ImGui::TextDisabled("BISTRO / MX110");
     ImGui::TextDisabled("F1  Hide inspector");
@@ -766,13 +782,13 @@ void Application::updateGui()
 
     // Tracy profiler status
     if (tracyProfiler_ && tracyProfiler_->isTracySupported()) {
-        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "✓ Tracy Profiler Active");
+        ImGui::TextColored(subduedUiColor(0.0f, 1.0f, 0.0f, 1.0f), "✓ Tracy Profiler Active");
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Tracy profiler is connected and collecting data.\n"
                               "Connect Tracy client to view detailed profiling information.");
         }
     } else {
-        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "○ Tracy Profiler Disabled");
+        ImGui::TextColored(subduedUiColor(0.7f, 0.7f, 0.7f, 1.0f), "○ Tracy Profiler Disabled");
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Tracy profiler is not available.\n"
                               "Compile with -DTRACY_ENABLE to enable profiling.");
@@ -780,18 +796,18 @@ void Application::updateGui()
     }
 
     // Color-coded performance indicators
-    ImVec4 cpuColor = ImVec4(0.0f, 1.0f, 0.0f, 1.0f); // Green for good FPS
+    ImVec4 cpuColor = subduedUiColor(0.0f, 1.0f, 0.0f, 1.0f); // Green for good FPS
     if (currentFPS_ < 30.0f) {
-        cpuColor = ImVec4(1.0f, 0.0f, 0.0f, 1.0f); // Red
+        cpuColor = subduedUiColor(1.0f, 0.0f, 0.0f, 1.0f); // Red
     } else if (currentFPS_ < 60.0f) {
-        cpuColor = ImVec4(1.0f, 1.0f, 0.0f, 1.0f); // Yellow
+        cpuColor = subduedUiColor(1.0f, 1.0f, 0.0f, 1.0f); // Yellow
     }
 
-    ImVec4 gpuColor = ImVec4(0.0f, 1.0f, 0.0f, 1.0f); // Green for good GPU time
+    ImVec4 gpuColor = subduedUiColor(0.0f, 1.0f, 0.0f, 1.0f); // Green for good GPU time
     if (currentGpuTimeMs_ > 33.33f) {                 // > 30 FPS equivalent
-        gpuColor = ImVec4(1.0f, 0.0f, 0.0f, 1.0f);    // Red
+        gpuColor = subduedUiColor(1.0f, 0.0f, 0.0f, 1.0f);    // Red
     } else if (currentGpuTimeMs_ > 16.67f) {          // > 60 FPS equivalent
-        gpuColor = ImVec4(1.0f, 1.0f, 0.0f, 1.0f);    // Yellow
+        gpuColor = subduedUiColor(1.0f, 1.0f, 0.0f, 1.0f);    // Yellow
     }
 
     ImGui::SameLine();
@@ -802,7 +818,7 @@ void Application::updateGui()
     }
     if (tracyProfiler_ && tracyProfiler_->isTracySupported()) {
         ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.0f, 1.0f, 1.0f, 1.0f), "● Tracy");
+        ImGui::TextColored(subduedUiColor(0.0f, 1.0f, 1.0f, 1.0f), "● Tracy");
     }
 
     if (ImGui::IsItemHovered()) {
@@ -1084,7 +1100,7 @@ void Application::renderAssetEditorPanel()
         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoTitleBar;
     ImGui::Begin("##BottomAssetManager", nullptr, assetWindowFlags);
 
-    ImGui::TextColored(ImVec4(0.37f, 0.68f, 1.0f, 1.0f), "ASSET MANAGER");
+    ImGui::TextColored(subduedUiColor(0.37f, 0.68f, 1.0f, 1.0f), "ASSET MANAGER");
     ImGui::SameLine();
     ImGui::TextDisabled(
         "Click select  |  Left drag orbit  |  Right dolly  |  Middle pan  |  Gizmo edit");
@@ -1210,7 +1226,7 @@ void Application::renderAssetEditorPanel()
                                         : selectedMesh.name_;
         ImGui::Text("Selected Asset");
         ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.37f, 0.68f, 1.0f, 1.0f), "%s",
+        ImGui::TextColored(subduedUiColor(0.37f, 0.68f, 1.0f, 1.0f), "%s",
                            selectedName.c_str());
 
         const float thirdWidth =
@@ -1656,7 +1672,7 @@ void Application::renderQualityControlPanel()
 
     ImGui::Text("Runtime Quality Ladder");
     if (qualityLevel < 0) {
-        ImGui::TextColored(ImVec4(0.37f, 0.68f, 1.0f, 1.0f),
+        ImGui::TextColored(subduedUiColor(0.37f, 0.68f, 1.0f, 1.0f),
                            "STARTUP  Original LOD0 geometry");
     }
     ImGui::TextDisabled("Selecting a preset re-enables automatic polygon LOD.");
@@ -1665,7 +1681,7 @@ void Application::renderQualityControlPanel()
     for (int level = 0; level < 4; ++level) {
         const bool selected = qualityLevel == level;
         if (selected) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.12f, 0.35f, 0.60f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Button, subduedUiColor(0.12f, 0.35f, 0.60f, 1.0f));
         }
 
         const string label =
@@ -1919,13 +1935,13 @@ void Application::renderPostProcessingControlWindow()
 
         // Info text
         if (fxaaEnabled) {
-            ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "✓ FXAA Active");
+            ImGui::TextColored(subduedUiColor(0.0f, 1.0f, 0.0f, 1.0f), "✓ FXAA Active");
             ImGui::Text("Performance impact: ~2-5%%");
         } else if (chromEnabled) {
-            ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.0f, 1.0f), "✓ Chromatic Aberration Active");
+            ImGui::TextColored(subduedUiColor(1.0f, 0.6f, 0.0f, 1.0f), "✓ Chromatic Aberration Active");
             ImGui::Text("Performance impact: ~1-2%%");
         } else {
-            ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "○ No Effect Active");
+            ImGui::TextColored(subduedUiColor(0.7f, 0.7f, 0.7f, 1.0f), "○ No Effect Active");
         }
 
         // Bokeh Depth of Field Controls
@@ -2016,7 +2032,7 @@ void Application::renderPostProcessingControlWindow()
 
             // Performance warning
             if (intensity > 0.7f && aperture > 0.7f) {
-                ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.0f, 1.0f), "⚠ High performance cost");
+                ImGui::TextColored(subduedUiColor(1.0f, 0.6f, 0.0f, 1.0f), "⚠ High performance cost");
             }
         }
     }
@@ -2041,9 +2057,9 @@ void Application::renderPostProcessingControlWindow()
         }
 
         if (renderer_->postOptionsUBO().debugMode == 4) { // Bokeh Depth Visualization
-            ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "Green: Sharp areas");
-            ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "Yellow: Moderate blur");
-            ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Red: Maximum blur");
+            ImGui::TextColored(subduedUiColor(0.0f, 1.0f, 0.0f, 1.0f), "Green: Sharp areas");
+            ImGui::TextColored(subduedUiColor(1.0f, 1.0f, 0.0f, 1.0f), "Yellow: Moderate blur");
+            ImGui::TextColored(subduedUiColor(1.0f, 0.0f, 0.0f, 1.0f), "Red: Maximum blur");
         }
     }
 
