@@ -1146,7 +1146,7 @@ void Application::renderQualityControlPanel()
 
     ImGui::Spacing();
     ImGui::TextDisabled("Base resources remain VRAM-safe:");
-    ImGui::BulletText("256px material textures");
+    ImGui::BulletText("512px material textures");
     ImGui::BulletText("75%% internal render scale");
     ImGui::BulletText("1024px shadow allocation");
 }
