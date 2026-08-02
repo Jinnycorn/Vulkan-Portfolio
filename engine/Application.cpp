@@ -1281,6 +1281,160 @@ void Application::renderAssetEditorPanel()
     ImGui::PopStyleVar();
 }
 
+void Application::pickAssetAtViewport(float mouseX, float mouseY)
+{
+    if (models_.empty() || windowSize_.width == 0 || windowSize_.height == 0) {
+        return;
+    }
+
+    // The scene is rendered over the full swapchain and the editor panels overlay it,
+    // therefore picking uses full-window Vulkan NDC coordinates.
+    const float ndcX = 2.0f * mouseX / float(windowSize_.width) - 1.0f;
+    const float ndcY = 2.0f * mouseY / float(windowSize_.height) - 1.0f;
+    const glm::mat4 inverseViewProjection =
+        glm::inverse(camera_.matrices.perspective * camera_.matrices.view);
+
+    glm::vec4 nearPoint = inverseViewProjection * glm::vec4(ndcX, ndcY, 0.0f, 1.0f);
+    glm::vec4 farPoint = inverseViewProjection * glm::vec4(ndcX, ndcY, 1.0f, 1.0f);
+    nearPoint /= nearPoint.w;
+    farPoint /= farPoint.w;
+
+    const glm::vec3 rayOrigin = glm::vec3(nearPoint);
+    const glm::vec3 rayDirection =
+        glm::normalize(glm::vec3(farPoint - nearPoint));
+
+    auto intersectAabb = [&](const AABB& bounds, float& entryDistance) {
+        float tMin = 0.0f;
+        float tMax = std::numeric_limits<float>::max();
+        for (int axis = 0; axis < 3; ++axis) {
+            const float origin = rayOrigin[axis];
+            const float direction = rayDirection[axis];
+            if (std::abs(direction) < 1.0e-7f) {
+                if (origin < bounds.min[axis] || origin > bounds.max[axis]) {
+                    return false;
+                }
+                continue;
+            }
+
+            float t1 = (bounds.min[axis] - origin) / direction;
+            float t2 = (bounds.max[axis] - origin) / direction;
+            if (t1 > t2) {
+                std::swap(t1, t2);
+            }
+            tMin = std::max(tMin, t1);
+            tMax = std::min(tMax, t2);
+            if (tMin > tMax) {
+                return false;
+            }
+        }
+        entryDistance = tMin;
+        return tMax >= 0.0f;
+    };
+
+    struct PickCandidate
+    {
+        int modelIndex;
+        int meshIndex;
+        float aabbDistance;
+    };
+    vector<PickCandidate> candidates;
+
+    for (int modelIndex = 0; modelIndex < int(models_.size()); ++modelIndex) {
+        auto& model = *models_[modelIndex];
+        if (!model.visible()) {
+            continue;
+        }
+        for (int meshIndex = 0; meshIndex < int(model.meshes().size()); ++meshIndex) {
+            auto& mesh = model.meshes()[meshIndex];
+            if (!mesh.editorVisible) {
+                continue;
+            }
+            float aabbDistance = 0.0f;
+            if (intersectAabb(mesh.worldBounds, aabbDistance)) {
+                candidates.push_back({modelIndex, meshIndex, aabbDistance});
+            }
+        }
+    }
+
+    std::sort(candidates.begin(), candidates.end(),
+              [](const PickCandidate& a, const PickCandidate& b) {
+                  return a.aabbDistance < b.aabbDistance;
+              });
+
+    float closestWorldDistance = std::numeric_limits<float>::max();
+    int closestModel = -1;
+    int closestMesh = -1;
+
+    for (const auto& candidate : candidates) {
+        if (candidate.aabbDistance > closestWorldDistance) {
+            break;
+        }
+
+        auto& model = *models_[candidate.modelIndex];
+        auto& mesh = model.meshes()[candidate.meshIndex];
+        const glm::mat4 worldMatrix = model.modelMatrix() * mesh.editorTransform;
+        const glm::mat4 inverseWorld = glm::inverse(worldMatrix);
+        const glm::vec3 localOrigin =
+            glm::vec3(inverseWorld * glm::vec4(rayOrigin, 1.0f));
+        const glm::vec3 localDirection = glm::normalize(
+            glm::vec3(inverseWorld * glm::vec4(rayDirection, 0.0f)));
+
+        for (size_t triangle = 0; triangle + 2 < mesh.indices_.size(); triangle += 3) {
+            const glm::vec3 v0 =
+                mesh.vertices_[mesh.indices_[triangle]].getPosition();
+            const glm::vec3 v1 =
+                mesh.vertices_[mesh.indices_[triangle + 1]].getPosition();
+            const glm::vec3 v2 =
+                mesh.vertices_[mesh.indices_[triangle + 2]].getPosition();
+
+            const glm::vec3 edge1 = v1 - v0;
+            const glm::vec3 edge2 = v2 - v0;
+            const glm::vec3 h = glm::cross(localDirection, edge2);
+            const float determinant = glm::dot(edge1, h);
+            if (std::abs(determinant) < 1.0e-7f) {
+                continue;
+            }
+
+            const float inverseDeterminant = 1.0f / determinant;
+            const glm::vec3 s = localOrigin - v0;
+            const float u = inverseDeterminant * glm::dot(s, h);
+            if (u < 0.0f || u > 1.0f) {
+                continue;
+            }
+
+            const glm::vec3 q = glm::cross(s, edge1);
+            const float v = inverseDeterminant * glm::dot(localDirection, q);
+            if (v < 0.0f || u + v > 1.0f) {
+                continue;
+            }
+
+            const float localDistance =
+                inverseDeterminant * glm::dot(edge2, q);
+            if (localDistance <= 1.0e-5f) {
+                continue;
+            }
+
+            const glm::vec3 localHit = localOrigin + localDirection * localDistance;
+            const glm::vec3 worldHit =
+                glm::vec3(worldMatrix * glm::vec4(localHit, 1.0f));
+            const float worldDistance = glm::length(worldHit - rayOrigin);
+            if (worldDistance < closestWorldDistance) {
+                closestWorldDistance = worldDistance;
+                closestModel = candidate.modelIndex;
+                closestMesh = candidate.meshIndex;
+            }
+        }
+    }
+
+    selectedModelIndex_ = closestModel >= 0 ? closestModel : selectedModelIndex_;
+    selectedMeshIndex_ = closestMesh;
+    if (closestMesh >= 0) {
+        const auto& mesh = models_[closestModel]->meshes()[closestMesh];
+        printLog("Viewport selected asset: {}",
+                 mesh.name_.empty() ? std::format("Mesh {}", closestMesh) : mesh.name_);
+    }
+}
+
 void Application::renderSelectedAssetGizmo()
 {
     if (selectedModelIndex_ < 0 || selectedModelIndex_ >= int(models_.size())) {
