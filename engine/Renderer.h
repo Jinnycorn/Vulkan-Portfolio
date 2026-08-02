@@ -93,6 +93,9 @@ struct PostOptionsUBO
     alignas(4) float nisPadding = 0.0f;
 };
 
+static_assert(sizeof(PostOptionsUBO) == 80, "PostOptionsUBO must match post.frag std140 layout");
+static_assert(sizeof(PostOptionsUBO) % 16 == 0, "PostOptionsUBO must be 16-byte aligned in size");
+
 struct SsaoOptionsUBO
 {
     alignas(4) float ssaoRadius = 0.1f;
