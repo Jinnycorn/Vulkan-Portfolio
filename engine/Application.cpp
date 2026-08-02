@@ -1448,7 +1448,33 @@ void Application::pickAssetAtViewport(float mouseX, float mouseY)
     selectedMeshIndex_ = closestMesh;
     selectedGizmoPivotValid_ = closestMesh >= 0;
     if (selectedGizmoPivotValid_) {
-        selectedGizmoPivotLocal_ = closestLocalHit;
+        const auto& selectedModel = *models_[closestModel];
+        const auto& selectedMesh = selectedModel.meshes()[closestMesh];
+        selectedGizmoPivotLocal_ = selectedMesh.editorPivot();
+
+        // Prefer the true asset center. Some Bistro OBJ submeshes batch disconnected
+        // geometry by material, producing an aggregate center far from what was
+        // clicked; only those cases fall back to the exact surface hit.
+        const glm::mat4 selectedWorld =
+            selectedModel.modelMatrix() * selectedMesh.editorRenderTransform();
+        const glm::vec4 centerClip =
+            camera_.matrices.perspective * camera_.matrices.view * selectedWorld *
+            glm::vec4(selectedGizmoPivotLocal_, 1.0f);
+        bool centerIsRelevant = centerClip.w > 1.0e-5f;
+        if (centerIsRelevant) {
+            const glm::vec2 centerNdc = glm::vec2(centerClip) / centerClip.w;
+            const glm::vec2 centerScreen(
+                (centerNdc.x + 1.0f) * 0.5f * float(windowSize_.width),
+                (centerNdc.y + 1.0f) * 0.5f * float(windowSize_.height));
+            const float viewportDiagonal =
+                glm::length(glm::vec2(float(windowSize_.width), float(windowSize_.height)));
+            centerIsRelevant =
+                glm::length(centerScreen - glm::vec2(mouseX, mouseY)) <=
+                viewportDiagonal * 0.20f;
+        }
+        if (!centerIsRelevant) {
+            selectedGizmoPivotLocal_ = closestLocalHit;
+        }
     }
     if (closestMesh >= 0) {
         const auto& mesh = models_[closestModel]->meshes()[closestMesh];
