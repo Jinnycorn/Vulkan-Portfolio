@@ -1783,9 +1783,20 @@ void Application::renderQualityControlPanel()
     }
 
     ImGui::Spacing();
+    bool nisEnabled = renderer_->postOptionsUBO().nisEnabled != 0;
+    if (ImGui::Checkbox("NVIDIA NIS-style Upscaling", &nisEnabled)) {
+        renderer_->postOptionsUBO().nisEnabled = nisEnabled ? 1 : 0;
+    }
+    if (nisEnabled) {
+        ImGui::SliderFloat("NIS Sharpness", &renderer_->postOptionsUBO().nisSharpness,
+                           0.0f, 1.0f, "%.2f");
+        ImGui::TextDisabled("Activates automatically when the output is larger than the render image.");
+    }
+
+    ImGui::Spacing();
     ImGui::TextDisabled("Base resources remain VRAM-safe:");
     ImGui::BulletText("50%% 2048px / 50%% 1024px material textures");
-    ImGui::BulletText("75%% internal render scale");
+    ImGui::BulletText("75%% internal render scale + NIS-style upscale");
     ImGui::BulletText("1024px shadow allocation");
     ImGui::BulletText("3-level automatic screen-space LOD");
 }
