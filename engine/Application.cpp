@@ -2,12 +2,14 @@
 #include "Logger.h"
 #include "GpuTimer.h"
 #include "TracyProfiler.h" // Add Tracy macros wrapper
+#include <ImGuizmo.h>
 
 #include <format>
 #include <glm/glm.hpp>
 #include <glm/gtx/string_cast.hpp>
 #include <glm/gtx/matrix_decompose.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 #include <chrono>
 #include <algorithm>
 
@@ -684,6 +686,7 @@ void Application::updateGui()
     {
         TRACY_CPU_SCOPE("ImGui NewFrame");
         ImGui::NewFrame();
+        ImGuizmo::BeginFrame();
     }
 
     if (!showUi_) {
@@ -955,6 +958,8 @@ void Application::updateGui()
         ImGui::Text("  Total Culled: %.1f%%", cullingPercentage);
     }
 
+    renderAssetEditorPanel();
+
     ImGui::Separator();
 
     for (uint32_t i = 0; i < models_.size(); i++) {
@@ -1027,9 +1032,198 @@ void Application::updateGui()
     ImGui::End();
     ImGui::PopStyleVar();
 
+    renderSelectedAssetGizmo();
+
     {
         TRACY_CPU_SCOPE("ImGui Render");
         ImGui::Render();
+    }
+}
+
+void Application::renderAssetEditorPanel()
+{
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.37f, 0.68f, 1.0f, 1.0f), "ASSET EDITOR");
+    ImGui::TextDisabled("Select a Bistro mesh, then place or remove it non-destructively.");
+
+    if (models_.empty()) {
+        ImGui::TextDisabled("No models loaded.");
+        return;
+    }
+
+    selectedModelIndex_ = std::clamp(selectedModelIndex_, 0, int(models_.size()) - 1);
+    const char* modelPreview = models_[selectedModelIndex_]->name().c_str();
+    if (ImGui::BeginCombo("Model", modelPreview)) {
+        for (int modelIndex = 0; modelIndex < int(models_.size()); ++modelIndex) {
+            const bool selected = selectedModelIndex_ == modelIndex;
+            if (ImGui::Selectable(models_[modelIndex]->name().c_str(), selected)) {
+                selectedModelIndex_ = modelIndex;
+                selectedMeshIndex_ = -1;
+            }
+            if (selected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        ImGui::EndCombo();
+    }
+
+    auto& meshes = models_[selectedModelIndex_]->meshes();
+    static ImGuiTextFilter assetFilter;
+    assetFilter.Draw("Search assets", -1.0f);
+
+    if (ImGui::BeginChild("##AssetList", ImVec2(0.0f, 190.0f), true)) {
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(meshes.size()));
+        while (clipper.Step()) {
+            for (int meshIndex = clipper.DisplayStart; meshIndex < clipper.DisplayEnd;
+                 ++meshIndex) {
+                auto& mesh = meshes[meshIndex];
+                const string displayName =
+                    mesh.name_.empty() ? std::format("Mesh {}", meshIndex) : mesh.name_;
+                if (!assetFilter.PassFilter(displayName.c_str())) {
+                    continue;
+                }
+
+                const string label =
+                    std::format("{}{}##asset_{}", mesh.editorVisible ? "" : "[HIDDEN] ",
+                                displayName, meshIndex);
+                if (!mesh.editorVisible) {
+                    ImGui::PushStyleColor(ImGuiCol_Text,
+                                          ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                }
+                if (ImGui::Selectable(label.c_str(), selectedMeshIndex_ == meshIndex)) {
+                    selectedMeshIndex_ = meshIndex;
+                }
+                if (!mesh.editorVisible) {
+                    ImGui::PopStyleColor();
+                }
+            }
+        }
+    }
+    ImGui::EndChild();
+
+    if (ImGui::Button("Restore All Removed", ImVec2(-1.0f, 0.0f))) {
+        for (auto& mesh : meshes) {
+            mesh.editorVisible = true;
+        }
+    }
+
+    if (selectedMeshIndex_ < 0 || selectedMeshIndex_ >= int(meshes.size())) {
+        ImGui::TextDisabled("Select an asset to show its transform gizmo.");
+        return;
+    }
+
+    auto& selectedMesh = meshes[selectedMeshIndex_];
+    const string selectedName = selectedMesh.name_.empty()
+                                    ? std::format("Mesh {}", selectedMeshIndex_)
+                                    : selectedMesh.name_;
+    ImGui::TextWrapped("Selected: %s", selectedName.c_str());
+
+    const float thirdWidth = std::max(70.0f, (ImGui::GetContentRegionAvail().x - 16.0f) / 3.0f);
+    if (ImGui::Selectable("Move", gizmoOperation_ == 0, 0, ImVec2(thirdWidth, 0.0f))) {
+        gizmoOperation_ = 0;
+    }
+    ImGui::SameLine();
+    if (ImGui::Selectable("Rotate", gizmoOperation_ == 1, 0, ImVec2(thirdWidth, 0.0f))) {
+        gizmoOperation_ = 1;
+    }
+    ImGui::SameLine();
+    if (ImGui::Selectable("Scale", gizmoOperation_ == 2, 0, ImVec2(thirdWidth, 0.0f))) {
+        gizmoOperation_ = 2;
+    }
+
+    ImGui::Checkbox("Local Space", &gizmoLocalSpace_);
+    ImGui::SameLine();
+    ImGui::Checkbox("Snap", &gizmoSnapEnabled_);
+    if (gizmoSnapEnabled_) {
+        if (gizmoOperation_ == 0) {
+            ImGui::DragFloat("Move Snap", &gizmoTranslationSnap_, 0.01f, 0.01f, 10.0f, "%.2f");
+        } else if (gizmoOperation_ == 1) {
+            ImGui::DragFloat("Angle Snap", &gizmoRotationSnap_, 1.0f, 1.0f, 90.0f, "%.0f deg");
+        } else {
+            ImGui::DragFloat("Scale Snap", &gizmoScaleSnap_, 0.01f, 0.01f, 1.0f, "%.2f");
+        }
+    }
+
+    float translation[3]{};
+    float rotation[3]{};
+    float scale[3]{1.0f, 1.0f, 1.0f};
+    ImGuizmo::DecomposeMatrixToComponents(glm::value_ptr(selectedMesh.editorTransform),
+                                          translation, rotation, scale);
+
+    bool transformChanged = false;
+    transformChanged |= ImGui::DragFloat3("Position", translation, 0.05f);
+    transformChanged |= ImGui::DragFloat3("Rotation", rotation, 0.5f);
+    transformChanged |= ImGui::DragFloat3("Scale", scale, 0.01f, 0.001f, 100.0f);
+    if (transformChanged) {
+        ImGuizmo::RecomposeMatrixFromComponents(translation, rotation, scale,
+                                                 glm::value_ptr(selectedMesh.editorTransform));
+        selectedMesh.editorTransformDirty = true;
+    }
+
+    if (selectedMesh.editorVisible) {
+        if (ImGui::Button("Remove Asset", ImVec2(-1.0f, 0.0f))) {
+            selectedMesh.editorVisible = false;
+        }
+    } else {
+        if (ImGui::Button("Place / Restore Asset", ImVec2(-1.0f, 0.0f))) {
+            selectedMesh.editorVisible = true;
+            selectedMesh.editorTransformDirty = true;
+        }
+    }
+
+    if (ImGui::Button("Reset Transform", ImVec2(-1.0f, 0.0f))) {
+        selectedMesh.editorTransform = glm::mat4(1.0f);
+        selectedMesh.editorTransformDirty = true;
+    }
+}
+
+void Application::renderSelectedAssetGizmo()
+{
+    if (selectedModelIndex_ < 0 || selectedModelIndex_ >= int(models_.size())) {
+        return;
+    }
+
+    auto& model = *models_[selectedModelIndex_];
+    auto& meshes = model.meshes();
+    if (selectedMeshIndex_ < 0 || selectedMeshIndex_ >= int(meshes.size())) {
+        return;
+    }
+
+    auto& mesh = meshes[selectedMeshIndex_];
+    if (!mesh.editorVisible) {
+        return;
+    }
+
+    ImGuizmo::SetOrthographic(false);
+    ImGuizmo::SetDrawlist(ImGui::GetForegroundDrawList());
+
+    const float panelWidth =
+        std::clamp(float(windowSize_.width) * 0.30f, 340.0f, 410.0f);
+    ImGuizmo::SetRect(0.0f, 0.0f, float(windowSize_.width) - panelWidth,
+                      float(windowSize_.height));
+
+    ImGuizmo::OPERATION operation = ImGuizmo::TRANSLATE;
+    if (gizmoOperation_ == 1) {
+        operation = ImGuizmo::ROTATE;
+    } else if (gizmoOperation_ == 2) {
+        operation = ImGuizmo::SCALE;
+    }
+    const ImGuizmo::MODE mode = gizmoLocalSpace_ ? ImGuizmo::LOCAL : ImGuizmo::WORLD;
+
+    float snap[3]{0.0f, 0.0f, 0.0f};
+    const float snapValue = gizmoOperation_ == 0   ? gizmoTranslationSnap_
+                            : gizmoOperation_ == 1 ? gizmoRotationSnap_
+                                                  : gizmoScaleSnap_;
+    snap[0] = snap[1] = snap[2] = snapValue;
+
+    glm::mat4 worldTransform = model.modelMatrix() * mesh.editorTransform;
+    if (ImGuizmo::Manipulate(glm::value_ptr(camera_.matrices.view),
+                             glm::value_ptr(camera_.matrices.perspective), operation, mode,
+                             glm::value_ptr(worldTransform), nullptr,
+                             gizmoSnapEnabled_ ? snap : nullptr)) {
+        mesh.editorTransform = glm::inverse(model.modelMatrix()) * worldTransform;
+        mesh.editorTransformDirty = true;
     }
 }
 
