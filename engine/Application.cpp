@@ -932,7 +932,7 @@ void Application::updateGui()
         lod2Pixels = std::max(lod2Pixels, lodCullPixels + 1.0f);
         renderer_->setLodThresholds(lod1Pixels, lod2Pixels, lodCullPixels);
     }
-    ImGui::TextDisabled("LOD uses projected size, so it adapts to distance and FOV.");
+    ImGui::TextDisabled("Startup uses original LOD0. Enable this to optimize by distance.");
 
     // Back-face culling is baked into the PBR and shadow pipelines.
     ImGui::TextDisabled("Back-face Culling: Enabled");
@@ -1179,7 +1179,7 @@ void Application::renderQualityControlPanel()
 
     ImGui::Spacing();
     ImGui::TextDisabled("Base resources remain VRAM-safe:");
-    ImGui::BulletText("1024px material textures");
+    ImGui::BulletText("Original-resolution material textures");
     ImGui::BulletText("75%% internal render scale");
     ImGui::BulletText("1024px shadow allocation");
     ImGui::BulletText("3-level automatic screen-space LOD");
