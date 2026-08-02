@@ -72,13 +72,26 @@ void Mesh::createBuffers(Context& ctx)
     lodIndexCounts_[0] = static_cast<uint32_t>(indices_.size());
     combinedIndices.insert(combinedIndices.end(), indices_.begin(), indices_.end());
 
-    lodIndexOffsets_[1] = combinedIndices.size() * sizeof(uint32_t);
-    lodIndexCounts_[1] = static_cast<uint32_t>(lod1Indices.size());
-    combinedIndices.insert(combinedIndices.end(), lod1Indices.begin(), lod1Indices.end());
+    if (lod1Indices == indices_) {
+        lodIndexOffsets_[1] = lodIndexOffsets_[0];
+        lodIndexCounts_[1] = lodIndexCounts_[0];
+    } else {
+        lodIndexOffsets_[1] = combinedIndices.size() * sizeof(uint32_t);
+        lodIndexCounts_[1] = static_cast<uint32_t>(lod1Indices.size());
+        combinedIndices.insert(combinedIndices.end(), lod1Indices.begin(), lod1Indices.end());
+    }
 
-    lodIndexOffsets_[2] = combinedIndices.size() * sizeof(uint32_t);
-    lodIndexCounts_[2] = static_cast<uint32_t>(lod2Indices.size());
-    combinedIndices.insert(combinedIndices.end(), lod2Indices.begin(), lod2Indices.end());
+    if (lod2Indices == indices_) {
+        lodIndexOffsets_[2] = lodIndexOffsets_[0];
+        lodIndexCounts_[2] = lodIndexCounts_[0];
+    } else if (lod2Indices == lod1Indices) {
+        lodIndexOffsets_[2] = lodIndexOffsets_[1];
+        lodIndexCounts_[2] = lodIndexCounts_[1];
+    } else {
+        lodIndexOffsets_[2] = combinedIndices.size() * sizeof(uint32_t);
+        lodIndexCounts_[2] = static_cast<uint32_t>(lod2Indices.size());
+        combinedIndices.insert(combinedIndices.end(), lod2Indices.begin(), lod2Indices.end());
+    }
 
     const VkDeviceSize vertexBufferSize = sizeof(vertices_[0]) * vertices_.size();
     const VkDeviceSize indexBufferSize = sizeof(uint32_t) * combinedIndices.size();
