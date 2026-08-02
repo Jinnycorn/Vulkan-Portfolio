@@ -1448,7 +1448,7 @@ void Application::pickAssetAtViewport(float mouseX, float mouseY)
     selectedMeshIndex_ = closestMesh;
     selectedGizmoPivotValid_ = closestMesh >= 0;
     if (selectedGizmoPivotValid_) {
-        const auto& selectedModel = *models_[closestModel];
+        auto& selectedModel = *models_[closestModel];
         const auto& selectedMesh = selectedModel.meshes()[closestMesh];
         selectedGizmoPivotLocal_ = selectedMesh.editorPivot();
 
