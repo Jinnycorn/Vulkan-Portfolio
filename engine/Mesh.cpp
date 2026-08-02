@@ -62,9 +62,9 @@ void Mesh::createBuffers(Context& ctx)
     };
 
     vector<uint32_t> lod1Indices =
-        indices_.size() >= 96 ? buildClusteredIndices(32) : indices_;
+        indices_.size() >= 96 ? buildClusteredIndices(48) : indices_;
     vector<uint32_t> lod2Indices =
-        indices_.size() >= 96 ? buildClusteredIndices(16) : lod1Indices;
+        indices_.size() >= 96 ? buildClusteredIndices(24) : lod1Indices;
 
     vector<uint32_t> combinedIndices;
     combinedIndices.reserve(indices_.size() + lod1Indices.size() + lod2Indices.size());
