@@ -8,7 +8,7 @@
     },
     {
       "pipelineNames": [ "pbrDeferred" ],
-      "colorAttachments": [ "gAlbedo", "gNormal", "gPosition", "gMaterial" ],
+      "colorAttachments": [ "gAlbedo", "gNormal", "gPosition", "gMaterial", "gMotion", "gReactive" ],
       "depthAttachment": "depthStencil",
       "stencilAttachment": "depthStencil"
     },
@@ -20,6 +20,12 @@
     },
     {
       "pipelineNames": [ "deferredLighting" ],
+      "colorAttachments": [],
+      "depthAttachment": "",
+      "stencilAttachment": ""
+    },
+    {
+      "pipelineNames": [ "fsr2Temporal" ],
       "colorAttachments": [],
       "depthAttachment": "",
       "stencilAttachment": ""
