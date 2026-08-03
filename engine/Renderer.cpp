@@ -164,7 +164,10 @@ Renderer::Renderer(Context& ctx, ShaderManager& shaderManager, const uint32_t& k
         vector<MaterialUBO> allMaterials;
 
         for (auto& m : models) {
-            m->prepareForBindlessRendering(samplerLinearRepeat_, allMaterials, *materialTextures_);
+            // Oblique walls, roofs and paving occupy a long, thin texture footprint. A plain
+            // trilinear sampler under-filters that footprint and makes the selected mip shimmer
+            // under temporal jitter. Anisotropic filtering stabilizes those material details.
+            m->prepareForBindlessRendering(samplerAnisoRepeat_, allMaterials, *materialTextures_);
         }
 
         materialBuffer_ = std::make_unique<StorageBuffer>(ctx_, allMaterials.data(),
