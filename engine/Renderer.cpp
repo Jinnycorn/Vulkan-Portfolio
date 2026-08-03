@@ -5,8 +5,34 @@
 #include <cstdlib>
 #include <algorithm>
 #include <cmath>
+#include <glm/gtc/quaternion.hpp>
 
 namespace hlab {
+
+namespace {
+float halton(uint32_t index, uint32_t base)
+{
+    float result = 0.0f;
+    float fraction = 1.0f;
+    while (index > 0) {
+        fraction /= static_cast<float>(base);
+        result += fraction * static_cast<float>(index % base);
+        index /= base;
+    }
+    return result;
+}
+
+float maxMatrixDelta(const glm::mat4& a, const glm::mat4& b)
+{
+    float delta = 0.0f;
+    for (int column = 0; column < 4; ++column) {
+        for (int row = 0; row < 4; ++row) {
+            delta = std::max(delta, std::abs(a[column][row] - b[column][row]));
+        }
+    }
+    return delta;
+}
+} // namespace
 
 Renderer::~Renderer()
 {
@@ -111,6 +137,7 @@ Renderer::Renderer(Context& ctx, ShaderManager& shaderManager, const uint32_t& k
         postOptionsUBO_.chromaticAberration = 1.55f;
         postOptionsUBO_.vignetteStrength = 0.0f;
         postOptionsUBO_.filmGrainStrength = 0.0f;
+        postOptionsUBO_.nisEnabled = 0;
         lod1PixelThreshold_ = 115.0f;
         lod2PixelThreshold_ = 38.0f;
         lodCullPixelThreshold_ = 2.0f;
@@ -152,6 +179,7 @@ Renderer::Renderer(Context& ctx, ShaderManager& shaderManager, const uint32_t& k
         descriptorSetNames["pbrDeferred"] = {"sceneOptions", "material"};
         descriptorSetNames["sky"] = {"skyOptions", "sky"};
         descriptorSetNames["deferredLighting"] = {"deferredLightingData"};
+        descriptorSetNames["fsr2Temporal"] = {"fsr2TemporalData"};
         descriptorSetNames["post"] = {"postProcessing"};
 
         unordered_map<string, vector<vector<BindingInfo>>> bindingInfos =
@@ -292,6 +320,33 @@ void Renderer::update(Camera& camera, vector<unique_ptr<Model>>& models, uint32_
 {
     TRACY_CPU_SCOPE("Renderer::update");
 
+    const glm::mat4 currentProjection = camera.matrices.perspective;
+    const glm::mat4 currentView = camera.matrices.view;
+    const uint32_t jitterIndex = static_cast<uint32_t>(renderFrameCounter_ % 16u) + 1u;
+    const glm::vec2 jitterPixels =
+        postOptionsUBO_.nisEnabled == 0
+            ? glm::vec2(halton(jitterIndex, 2u) - 0.5f, halton(jitterIndex, 3u) - 0.5f)
+            : glm::vec2(0.0f);
+
+    glm::mat4 jitteredProjection = currentProjection;
+    jitteredProjection[2][0] += (2.0f * jitterPixels.x) / float(temporalRenderWidth_);
+    jitteredProjection[2][1] += (2.0f * jitterPixels.y) / float(temporalRenderHeight_);
+
+    const bool cameraCut = temporalHistoryValid_ && maxMatrixDelta(currentView, previousView_) > 0.75f;
+    const bool resetHistory = !temporalHistoryValid_ || temporalModeChanged_ || cameraCut;
+    sceneUBO_.projection = jitteredProjection;
+    sceneUBO_.view = currentView;
+    sceneUBO_.projectionNoJitter = currentProjection;
+    sceneUBO_.previousProjectionNoJitter =
+        resetHistory ? currentProjection : previousProjectionNoJitter_;
+    sceneUBO_.previousView = resetHistory ? currentView : previousView_;
+    sceneUBO_.temporalJitter = glm::vec4(jitterPixels,
+        resetHistory ? jitterPixels : previousJitterPixels_);
+    sceneUBO_.temporalParams = glm::vec4(resetHistory ? 1.0f : 0.0f,
+        float(renderFrameCounter_), float(temporalRenderWidth_), float(temporalRenderHeight_));
+    sceneUBO_.temporalExposure = glm::vec4(postOptionsUBO_.exposure,
+        resetHistory ? postOptionsUBO_.exposure : previousExposure_, 0.0f, 0.0f);
+
     {
         TRACY_CPU_SCOPE("Resolve Occlusion Queries");
         resolveOcclusionQueries(currentFrame);
@@ -325,11 +380,24 @@ void Renderer::update(Camera& camera, vector<unique_ptr<Model>>& models, uint32_
             bufferVector[currentFrame]->updateFromCpuData();
         }
     }
+
+    previousView_ = currentView;
+    previousProjectionNoJitter_ = currentProjection;
+    previousJitterPixels_ = jitterPixels;
+    previousExposure_ = postOptionsUBO_.exposure;
+    temporalModeChanged_ = false;
 }
 
 void Renderer::updateBoneData(const vector<unique_ptr<Model>>& models, uint32_t currentFrame)
 {
     TRACY_CPU_SCOPE("Renderer::updateBoneData");
+
+    // Preserve last frame's skinning pose before writing the current pose.
+    for (int i = 0; i < 65; ++i) {
+        boneDataUBO_.previousBoneMatrices[i] = temporalHistoryValid_
+            ? boneDataUBO_.boneMatrices[i]
+            : glm::mat4(1.0f);
+    }
 
     // Reset bone data
     boneDataUBO_.animationData.x = 0.0f;
@@ -353,6 +421,12 @@ void Renderer::updateBoneData(const vector<unique_ptr<Model>>& models, uint32_t 
                 boneDataUBO_.boneMatrices[i] = boneMatrices[i];
             }
 
+            if (!temporalHistoryValid_) {
+                for (size_t i = 0; i < bonesToCopy; ++i) {
+                    boneDataUBO_.previousBoneMatrices[i] = boneMatrices[i];
+                }
+            }
+
             break; // For now, use the first animated model
         }
     }
@@ -368,6 +442,21 @@ void Renderer::updateBoneData(const vector<unique_ptr<Model>>& models, uint32_t 
 
     // Update the GPU buffer using the consolidated map structure
     perFrameUniformBuffers_["boneData"][currentFrame]->updateFromCpuData();
+}
+
+void Renderer::invalidateTemporalHistory()
+{
+    temporalHistoryValid_ = false;
+    temporalModeChanged_ = true;
+}
+
+void Renderer::setUpscalerMode(int mode)
+{
+    mode = std::clamp(mode, 0, 1);
+    if (postOptionsUBO_.nisEnabled != mode) {
+        postOptionsUBO_.nisEnabled = mode;
+        invalidateTemporalHistory();
+    }
 }
 
 void Renderer::draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swapchainImageView,
@@ -400,6 +489,12 @@ void Renderer::draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swap
         if (renderNode.pipelineNames[0] == "deferredLighting") {
             TRACY_CPU_SCOPE("deferredLighting");
             pipelines_.at("deferredLighting")->dispatch(cmd, currentFrame); // Compute
+            continue;
+        }
+
+        if (renderNode.pipelineNames[0] == "fsr2Temporal") {
+            TRACY_CPU_SCOPE("fsr2Temporal");
+            pipelines_.at("fsr2Temporal")->dispatch(cmd, currentFrame);
             continue;
         }
 
@@ -624,11 +719,43 @@ void Renderer::draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swap
                         const size_t visibleMeshCount = drawItems.size();
                         for (const DrawItem& item : drawItems) {
                             PbrPushConstants pushConstants;
-                            pushConstants.model =
+                            const glm::mat4 currentModel =
                                 item.model->modelMatrix() * item.mesh->editorRenderTransform();
+                            pushConstants.model = currentModel;
                             pushConstants.materialIndex = item.mesh->materialIndex_;
-                            memcpy(pushConstants.coeffs, item.model->coeffs(),
-                                   sizeof(pushConstants.coeffs));
+                            // Preserve the material controls used by the deferred shader.
+                            pushConstants.coeffs[0] = item.model->coeffs()[0];
+                            pushConstants.coeffs[1] = item.model->coeffs()[1];
+                            pushConstants.coeffs[2] = item.model->coeffs()[2];
+                            pushConstants.coeffs[3] = item.model->coeffs()[4];
+                            pushConstants.coeffs[4] = item.model->coeffs()[5];
+                            const auto previousIt = previousMeshTransforms_.find(item.mesh);
+                            const glm::mat4 previousModel =
+                                (!temporalHistoryValid_ || previousIt == previousMeshTransforms_.end())
+                                    ? currentModel
+                                    : previousIt->second;
+                            const glm::vec3 previousTranslation(previousModel[3]);
+                            glm::vec3 previousScale(
+                                glm::length(glm::vec3(previousModel[0])),
+                                glm::length(glm::vec3(previousModel[1])),
+                                glm::length(glm::vec3(previousModel[2])));
+                            previousScale = glm::max(previousScale, glm::vec3(0.00001f));
+                            glm::mat3 previousRotationMatrix;
+                            previousRotationMatrix[0] = glm::vec3(previousModel[0]) / previousScale.x;
+                            previousRotationMatrix[1] = glm::vec3(previousModel[1]) / previousScale.y;
+                            previousRotationMatrix[2] = glm::vec3(previousModel[2]) / previousScale.z;
+                            const glm::quat previousRotation =
+                                glm::normalize(glm::quat_cast(previousRotationMatrix));
+                            pushConstants.coeffs[5] = previousTranslation.x;
+                            pushConstants.coeffs[6] = previousTranslation.y;
+                            pushConstants.coeffs[7] = previousTranslation.z;
+                            pushConstants.coeffs[8] = previousRotation.x;
+                            pushConstants.coeffs[9] = previousRotation.y;
+                            pushConstants.coeffs[10] = previousRotation.z;
+                            pushConstants.coeffs[11] = previousRotation.w;
+                            pushConstants.coeffs[12] = previousScale.x;
+                            pushConstants.coeffs[13] = previousScale.y;
+                            pushConstants.coeffs[14] = previousScale.z;
                             vkCmdPushConstants(cmd, pipelines_.at(pipelineName)->pipelineLayout(),
                                                VK_SHADER_STAGE_VERTEX_BIT |
                                                    VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -679,6 +806,13 @@ void Renderer::draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swap
         }
     }
 
+    for (const auto& model : models) {
+        for (const auto& mesh : model->meshes()) {
+            previousMeshTransforms_[&mesh] =
+                model->modelMatrix() * mesh.editorRenderTransform();
+        }
+    }
+    temporalHistoryValid_ = true;
     ++renderFrameCounter_;
 }
 
@@ -693,10 +827,12 @@ void Renderer::createPipelines(const VkFormat swapChainColorFormat, const VkForm
 
             renderGraph_.addRenderNode({{"shadowMap"}, {}, "shadowMap", ""});
             renderGraph_.addRenderNode(
-                {{"pbrDeferred"}, {"gAlbedo", "gNormal", "gPosition", "gMaterial"},
+                {{"pbrDeferred"}, {"gAlbedo", "gNormal", "gPosition", "gMaterial",
+                                   "gMotion", "gReactive"},
                  "depthStencil", ""});
             renderGraph_.addRenderNode({{"sky"}, {"floatColor1"}, "depthStencil", ""});
             renderGraph_.addRenderNode({{"deferredLighting"}, {}, "", ""});
+            renderGraph_.addRenderNode({{"fsr2Temporal"}, {}, "", ""});
             renderGraph_.addRenderNode({{"post"}, {"swapchain"}, "", ""});
         }
     }
@@ -715,7 +851,8 @@ void Renderer::createPipelines(const VkFormat swapChainColorFormat, const VkForm
         pipelines_["pbrDeferred"] = std::make_unique<Pipeline>(
             ctx_, shaderManager_, PipelineConfig::createPbrDeferred(),
             vector<VkFormat>{VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R16G16B16A16_SFLOAT,
-                             VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R8G8B8A8_UNORM},
+                             VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R8G8B8A8_UNORM,
+                             VK_FORMAT_R16G16_SFLOAT, VK_FORMAT_R8_UNORM},
             depthFormat, VK_SAMPLE_COUNT_1_BIT);
 
         pipelines_["sky"] = std::make_unique<Pipeline>(ctx_, shaderManager_, PipelineConfig::createSky(),
@@ -739,6 +876,9 @@ void Renderer::createPipelines(const VkFormat swapChainColorFormat, const VkForm
         pipelines_["deferredLighting"] =
             std::make_unique<Pipeline>(ctx_, shaderManager_, PipelineConfig::createDeferredLighting(),
                                   vector<VkFormat>{}, nullopt, VK_SAMPLE_COUNT_1_BIT);
+        pipelines_["fsr2Temporal"] =
+            std::make_unique<Pipeline>(ctx_, shaderManager_, PipelineConfig::createFsr2Temporal(),
+                                  vector<VkFormat>{}, nullopt, VK_SAMPLE_COUNT_1_BIT);
     }
 
     // Store the selected format for texture creation
@@ -748,6 +888,9 @@ void Renderer::createPipelines(const VkFormat swapChainColorFormat, const VkForm
 void Renderer::createTextures(uint32_t swapchainWidth, uint32_t swapchainHeight)
 {
     TRACY_CPU_SCOPE("Renderer::createTextures");
+
+    const uint32_t presentationWidth = swapchainWidth;
+    const uint32_t presentationHeight = swapchainHeight;
 
     const char* lowSpecValue = std::getenv("HLAB_LOW_SPEC");
     const bool lowSpecMode = lowSpecValue != nullptr && string(lowSpecValue) != "0";
@@ -760,6 +903,8 @@ void Renderer::createTextures(uint32_t swapchainWidth, uint32_t swapchainHeight)
         printLog("Internal render resolution: {}x{} (75% scale)", swapchainWidth,
                  swapchainHeight);
     }
+    temporalRenderWidth_ = swapchainWidth;
+    temporalRenderHeight_ = swapchainHeight;
 
     {
         TRACY_CPU_SCOPE("createSamplers");
@@ -774,7 +919,9 @@ void Renderer::createTextures(uint32_t swapchainWidth, uint32_t swapchainHeight)
     const vector<string> imageNames = {"depthStencil", "floatColor1",    "floatColor2",
                                        "shadowMap",    "prefilteredMap", "irradianceMap",
                                        "brdfLut",      "gAlbedo",        "gNormal",
-                                       "gPosition",    "gMaterial"};
+                                       "gPosition",    "gMaterial",      "gMotion",
+                                       "gReactive",    "temporalOutput", "historyColor0",
+                                       "historyColor1", "historyDepth0", "historyDepth1"};
 
     for (const auto& name : imageNames) {
         imageBuffers_[name] = std::make_unique<Image2D>(ctx_);
@@ -845,6 +992,24 @@ void Renderer::createTextures(uint32_t swapchainWidth, uint32_t swapchainHeight)
         imageBuffers_["floatColor2"]->createImage(
             selectedHDRFormat_, swapchainWidth, swapchainHeight, VK_SAMPLE_COUNT_1_BIT,
             storageUsage, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, 0, VK_IMAGE_VIEW_TYPE_2D);
+
+        const VkImageUsageFlags temporalUsage = VK_IMAGE_USAGE_SAMPLED_BIT |
+            VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        for (const char* name : {"temporalOutput", "historyColor0", "historyColor1"}) {
+            imageBuffers_[name]->createImage(
+                VK_FORMAT_R16G16B16A16_SFLOAT, presentationWidth, presentationHeight,
+                VK_SAMPLE_COUNT_1_BIT, temporalUsage, VK_IMAGE_ASPECT_COLOR_BIT,
+                1, 1, 0, VK_IMAGE_VIEW_TYPE_2D);
+            imageBuffers_[name]->setSampler(samplerLinearClamp_.handle());
+        }
+        for (const char* name : {"historyDepth0", "historyDepth1"}) {
+            imageBuffers_[name]->createImage(
+                VK_FORMAT_R32_SFLOAT, presentationWidth, presentationHeight,
+                VK_SAMPLE_COUNT_1_BIT, temporalUsage, VK_IMAGE_ASPECT_COLOR_BIT,
+                1, 1, 0, VK_IMAGE_VIEW_TYPE_2D);
+            imageBuffers_[name]->setSampler(samplerLinearClamp_.handle());
+        }
     }
 
     {
@@ -898,6 +1063,15 @@ void Renderer::createTextures(uint32_t swapchainWidth, uint32_t swapchainHeight)
             materialFormat, swapchainWidth, swapchainHeight, VK_SAMPLE_COUNT_1_BIT, gBufferUsage,
             VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, 0, VK_IMAGE_VIEW_TYPE_2D);
         imageBuffers_["gMaterial"]->setSampler(samplerLinearClamp_.handle());
+
+        imageBuffers_["gMotion"]->createImage(
+            VK_FORMAT_R16G16_SFLOAT, swapchainWidth, swapchainHeight, VK_SAMPLE_COUNT_1_BIT,
+            gBufferUsage, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, 0, VK_IMAGE_VIEW_TYPE_2D);
+        imageBuffers_["gMotion"]->setSampler(samplerLinearClamp_.handle());
+        imageBuffers_["gReactive"]->createImage(
+            VK_FORMAT_R8_UNORM, swapchainWidth, swapchainHeight, VK_SAMPLE_COUNT_1_BIT,
+            gBufferUsage, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, 0, VK_IMAGE_VIEW_TYPE_2D);
+        imageBuffers_["gReactive"]->setSampler(samplerLinearClamp_.handle());
 
         printLog("G-buffer creation complete");
     }
