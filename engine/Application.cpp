@@ -48,6 +48,7 @@ Application::Application(const ApplicationConfig& config)
                       {"sky", {"skybox.vert.spv", "skybox.frag.spv"}},
                       // {"ssao", {"ssao.comp.spv"}},
                       {"deferredLighting", {"deferredLighting.comp.spv"}},
+                      {"fsr2Temporal", {"fsr2Temporal.comp.spv"}},
                       {"post", {"post.vert.spv", "post.frag.spv"}},
                       {"gui", {"imgui.vert", "imgui.frag"}}}),
       guiRenderer_(ctx_, shaderManager_, swapchain_.colorFormat(), kMaxFramesInFlight),
@@ -413,6 +414,7 @@ void Application::recreateSwapchain()
     const float aspectRatio = float(windowSize_.width) / float(windowSize_.height);
     camera_.setPerspective(camera_.fov, aspectRatio, camera_.znear, camera_.zfar);
     guiRenderer_.resize(windowSize_.width, windowSize_.height);
+    renderer_->invalidateTemporalHistory();
 
     framebufferResized_ = false;
     printLog("Window render area resized to {}x{}", windowSize_.width, windowSize_.height);
@@ -494,8 +496,6 @@ void Application::run()
         {
             TRACY_CPU_SCOPE("Camera Update");
             camera_.update(deltaTime);
-            renderer_->sceneUBO().projection = camera_.matrices.perspective;
-            renderer_->sceneUBO().view = camera_.matrices.view;
             renderer_->sceneUBO().cameraPos = camera_.position;
         }
 
@@ -1641,10 +1641,10 @@ void Application::renderQualityControlPanel()
 
     const char* names[] = {"Optimized", "Balanced", "High", "Showcase"};
     const char* descriptions[] = {
-        "Maximum stability for MX110. Shadows off, NIS sharpness 0.25.",
-        "1024px shadows, 8-sample SSAO and NIS sharpness 0.35.",
-        "16-sample SSAO, ACES tone mapping and NIS sharpness 0.45.",
-        "32-sample SSAO, quality FXAA fallback and NIS sharpness 0.55."
+        "Maximum stability for MX110 with FSR 2.2 temporal reconstruction.",
+        "1024px shadows, 8-sample SSAO and FSR 2.2.",
+        "16-sample SSAO, ACES tone mapping and FSR 2.2.",
+        "32-sample SSAO and FSR 2.2 temporal anti-aliasing."
     };
 
     auto applyPreset = [&](int level) {
@@ -1674,7 +1674,7 @@ void Application::renderQualityControlPanel()
             post.contrast = 1.0f;
             post.saturation = 1.0f;
             post.chromaticAberration = 1.55f;
-            post.nisEnabled = 1;
+            post.nisEnabled = 0;
             post.nisSharpness = 0.25f;
             post.vignetteStrength = 0.0f;
             sky.environmentIntensity = 1.0f;
@@ -1693,7 +1693,7 @@ void Application::renderQualityControlPanel()
             post.contrast = 1.0f;
             post.saturation = 1.0f;
             post.chromaticAberration = 1.70f;
-            post.nisEnabled = 1;
+            post.nisEnabled = 0;
             post.nisSharpness = 0.35f;
             post.vignetteStrength = 0.0f;
             sky.environmentIntensity = 1.0f;
@@ -1712,7 +1712,7 @@ void Application::renderQualityControlPanel()
             post.contrast = 1.03f;
             post.saturation = 1.04f;
             post.chromaticAberration = 1.85f;
-            post.nisEnabled = 1;
+            post.nisEnabled = 0;
             post.nisSharpness = 0.45f;
             post.vignetteStrength = 0.04f;
             sky.environmentIntensity = 1.1f;
@@ -1731,13 +1731,14 @@ void Application::renderQualityControlPanel()
             post.contrast = 1.06f;
             post.saturation = 1.06f;
             post.chromaticAberration = 2.00f;
-            post.nisEnabled = 1;
+            post.nisEnabled = 0;
             post.nisSharpness = 0.55f;
             post.vignetteStrength = 0.08f;
             post.vignetteRadius = 0.9f;
             sky.environmentIntensity = 1.2f;
             break;
         }
+        renderer_->invalidateTemporalHistory();
     };
 
     ImGui::Text("Runtime Quality Ladder");
@@ -1782,29 +1783,16 @@ void Application::renderQualityControlPanel()
         renderer_->ssaoOptionsUBO().ssaoSampleCount = ssaoSamples;
     }
 
-    const float aaValue = renderer_->postOptionsUBO().chromaticAberration;
-    int aaMode = aaValue > 1.7f ? 3 : aaValue > 1.4f ? 2 : aaValue > 1.0f ? 1 : 0;
-    const char* aaModes[] = {"Off", "Fast FXAA", "Balanced FXAA", "Quality FXAA"};
-    if (ImGui::Combo("Anti-Aliasing", &aaMode, aaModes, IM_ARRAYSIZE(aaModes))) {
-        const float values[] = {0.0f, 1.25f, 1.55f, 1.79f};
-        renderer_->postOptionsUBO().chromaticAberration = values[aaMode];
-    }
-
-    ImGui::Spacing();
-    bool nisEnabled = renderer_->postOptionsUBO().nisEnabled != 0;
-    if (ImGui::Checkbox("NVIDIA NIS-style Upscaling", &nisEnabled)) {
-        renderer_->postOptionsUBO().nisEnabled = nisEnabled ? 1 : 0;
-    }
-    if (nisEnabled) {
-        ImGui::SliderFloat("NIS Sharpness", &renderer_->postOptionsUBO().nisSharpness,
-                           0.0f, 1.0f, "%.2f");
-        ImGui::TextDisabled("Activates automatically when the output is larger than the render image.");
+    int upscalerMode = renderer_->upscalerMode();
+    const char* upscalers[] = {"AMD FSR 2.2", "NVIDIA NIS"};
+    if (ImGui::Combo("Upscaling", &upscalerMode, upscalers, IM_ARRAYSIZE(upscalers))) {
+        renderer_->setUpscalerMode(upscalerMode);
     }
 
     ImGui::Spacing();
     ImGui::TextDisabled("Base resources remain VRAM-safe:");
     ImGui::BulletText("50%% 2048px / 50%% 1024px material textures");
-    ImGui::BulletText("75%% internal render scale + NIS-style upscale");
+    ImGui::BulletText("75%% internal render scale + FSR 2.2 temporal upscale");
     ImGui::BulletText("1024px shadow allocation");
     ImGui::BulletText("3-level automatic screen-space LOD");
 }
