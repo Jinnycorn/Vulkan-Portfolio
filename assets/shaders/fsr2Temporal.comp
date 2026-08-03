@@ -1,0 +1,125 @@
+#version 450
+#extension GL_KHR_vulkan_glsl : enable
+
+// FSR 2.2 integration-facing temporal reconstruction pass. The engine supplies the
+// same application-owned inputs required by the FSR2 Vulkan backend: jittered color
+// and depth, unjittered motion vectors, exposure history and a reactive mask.
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0) uniform SceneDataUBO {
+    mat4 projection;
+    mat4 view;
+    vec3 cameraPos;
+    float padding1;
+    vec3 directionalLightDir;
+    float padding2;
+    vec3 directionalLightColor;
+    float padding3;
+    mat4 lightSpaceMatrix;
+    mat4 projectionNoJitter;
+    mat4 previousProjectionNoJitter;
+    mat4 previousView;
+    vec4 temporalJitter;
+    vec4 temporalParams;
+    vec4 temporalExposure;
+} sceneData;
+
+layout(set = 0, binding = 1) uniform PostProcessingOptions {
+    int toneMappingType;
+    float exposure;
+    float gamma;
+    float maxWhite;
+    float contrast;
+    float brightness;
+    float saturation;
+    float vibrance;
+    float vignetteStrength;
+    float vignetteRadius;
+    float filmGrainStrength;
+    float chromaticAberration;
+    int debugMode;
+    int showOnlyChannel;
+    float debugSplit;
+    float padding1;
+    int nisEnabled;
+    float nisSharpness;
+    float nisScaleThreshold;
+    float nisPadding;
+} postOptions;
+
+layout(set = 0, binding = 2) uniform sampler2D floatColor2;
+layout(set = 0, binding = 3) uniform sampler2D depthStencil;
+layout(set = 0, binding = 4) uniform sampler2D gMotion;
+layout(set = 0, binding = 5) uniform sampler2D gReactive;
+layout(set = 0, binding = 6) uniform sampler2D historyColorPrev;
+layout(set = 0, binding = 7) uniform sampler2D historyDepthPrev;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D temporalOutput;
+layout(set = 0, binding = 9, rgba16f) uniform writeonly image2D historyColorCurrent;
+layout(set = 0, binding = 10, r32f) uniform writeonly image2D historyDepthCurrent;
+
+vec3 sampleCurrent(vec2 uv)
+{
+    return texture(floatColor2, clamp(uv, vec2(0.0), vec2(1.0))).rgb;
+}
+
+void neighborhoodBounds(vec2 uv, out vec3 minimumColor, out vec3 maximumColor)
+{
+    vec2 texel = 1.0 / vec2(textureSize(floatColor2, 0));
+    minimumColor = vec3(1e20);
+    maximumColor = vec3(-1e20);
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            vec3 value = sampleCurrent(uv + vec2(x, y) * texel);
+            minimumColor = min(minimumColor, value);
+            maximumColor = max(maximumColor, value);
+        }
+    }
+}
+
+void main()
+{
+    ivec2 outputSize = imageSize(temporalOutput);
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pixel, outputSize))) {
+        return;
+    }
+
+    vec2 uv = (vec2(pixel) + 0.5) / vec2(outputSize);
+    vec3 currentColor = sampleCurrent(uv);
+    float currentDepth = texture(depthStencil, uv).r;
+
+    // Motion is previous-current NDC. Full-screen UV uses the same orientation, so half
+    // an NDC unit converts it to normalized texture coordinates.
+    vec2 motion = texture(gMotion, uv).rg;
+    vec2 previousUv = uv + motion * 0.5;
+    float reactive = clamp(texture(gReactive, uv).r, 0.0, 1.0);
+
+    bool reset = sceneData.temporalParams.x > 0.5 || postOptions.nisEnabled != 0;
+    bool outside = any(lessThan(previousUv, vec2(0.0))) ||
+                   any(greaterThan(previousUv, vec2(1.0)));
+    vec3 resolved = currentColor;
+
+    if (!reset && !outside) {
+        vec3 history = texture(historyColorPrev, previousUv).rgb;
+        float previousDepth = texture(historyDepthPrev, previousUv).r;
+        float exposureRatio = sceneData.temporalExposure.y /
+            max(sceneData.temporalExposure.x, 1e-4);
+        history *= exposureRatio;
+
+        vec3 minimumColor;
+        vec3 maximumColor;
+        neighborhoodBounds(uv, minimumColor, maximumColor);
+        history = clamp(history, minimumColor, maximumColor);
+
+        float depthDelta = abs(previousDepth - currentDepth);
+        float disocclusion = smoothstep(0.0015, 0.02, depthDelta);
+        float motionRejection = clamp(length(motion) * 12.0, 0.0, 1.0);
+        float historyWeight = 0.92 * (1.0 - reactive) *
+            (1.0 - disocclusion) * (1.0 - 0.65 * motionRejection);
+        resolved = mix(currentColor, history, clamp(historyWeight, 0.0, 0.94));
+    }
+
+    imageStore(temporalOutput, pixel, vec4(resolved, 1.0));
+    imageStore(historyColorCurrent, pixel, vec4(resolved, 1.0));
+    imageStore(historyDepthCurrent, pixel, vec4(currentDepth, 0.0, 0.0, 0.0));
+}
