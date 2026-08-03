@@ -1,0 +1,17 @@
+﻿Automatically downloaded runtime assets
+
+IBL:
+https://github.com/KhronosGroup/glTF-Sample-Environments
+
+Damaged Helmet:
+https://github.com/KhronosGroup/glTF-Sample-Assets
+
+Animated FBX fallback:
+https://github.com/assimp/assimp/blob/master/test/models/FBX/animation_with_skeleton.fbx
+This public test asset replaces the unavailable Mixamo Leonard files.
+
+Amazon Lumberyard Bistro:
+https://github.com/jvm-graphics-labs/awesome-3d-meshes/tree/master/McGuire/Amazon%20Lumberyard%20Bistro
+Amazon Lumberyard Bistro is CC BY 4.0.
+
+These files are downloaded locally and remain excluded from git.

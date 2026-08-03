@@ -1,0 +1,7 @@
+C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/CMakeFiles/Basic_Context.dir
+C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/CMakeFiles/Basic_Window.dir
+C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/CMakeFiles/ALL_BUILD.dir
+C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/CMakeFiles/ZERO_CHECK.dir
+C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-build/CMakeFiles/ALL_BUILD.dir
+C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-build/src/CMakeFiles/glfw.dir
+C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-build/src/CMakeFiles/update_mappings.dir

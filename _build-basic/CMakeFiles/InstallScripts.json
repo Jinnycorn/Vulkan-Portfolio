@@ -1,0 +1,9 @@
+{
+	"InstallScripts" : 
+	[
+		"C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/cmake_install.cmake",
+		"C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-build/cmake_install.cmake",
+		"C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-build/src/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

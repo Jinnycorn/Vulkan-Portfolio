@@ -1,0 +1,14 @@
+# Target labels
+ glfw-populate
+# Source files and their labels
+C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/glfw-populate
+C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/2edab18aed7bda7923375185b2b390a7/glfw-populate.rule
+C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/75650502f37842716e7f8322764a325a/glfw-populate-complete.rule
+C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/da285ba5ae202f66743f59e580cb71fd/glfw-populate-build.rule
+C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/da285ba5ae202f66743f59e580cb71fd/glfw-populate-configure.rule
+C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/da285ba5ae202f66743f59e580cb71fd/glfw-populate-download.rule
+C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/da285ba5ae202f66743f59e580cb71fd/glfw-populate-install.rule
+C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/da285ba5ae202f66743f59e580cb71fd/glfw-populate-mkdir.rule
+C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/da285ba5ae202f66743f59e580cb71fd/glfw-populate-patch.rule
+C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/da285ba5ae202f66743f59e580cb71fd/glfw-populate-test.rule
+C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/da285ba5ae202f66743f59e580cb71fd/glfw-populate-update.rule

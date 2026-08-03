@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/glfw-populate"
+		},
+		{
+			"file" : "C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/2edab18aed7bda7923375185b2b390a7/glfw-populate.rule"
+		},
+		{
+			"file" : "C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/75650502f37842716e7f8322764a325a/glfw-populate-complete.rule"
+		},
+		{
+			"file" : "C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/da285ba5ae202f66743f59e580cb71fd/glfw-populate-build.rule"
+		},
+		{
+			"file" : "C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/da285ba5ae202f66743f59e580cb71fd/glfw-populate-configure.rule"
+		},
+		{
+			"file" : "C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/da285ba5ae202f66743f59e580cb71fd/glfw-populate-download.rule"
+		},
+		{
+			"file" : "C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/da285ba5ae202f66743f59e580cb71fd/glfw-populate-install.rule"
+		},
+		{
+			"file" : "C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/da285ba5ae202f66743f59e580cb71fd/glfw-populate-mkdir.rule"
+		},
+		{
+			"file" : "C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/da285ba5ae202f66743f59e580cb71fd/glfw-populate-patch.rule"
+		},
+		{
+			"file" : "C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/da285ba5ae202f66743f59e580cb71fd/glfw-populate-test.rule"
+		},
+		{
+			"file" : "C:/Users/ehgam/Documents/Vulkan-Portfolio/_build-basic/_deps/glfw-subbuild/CMakeFiles/da285ba5ae202f66743f59e580cb71fd/glfw-populate-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"glfw-populate"
+		],
+		"name" : "glfw-populate"
+	}
+}
