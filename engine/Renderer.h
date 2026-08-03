@@ -38,7 +38,7 @@ struct SceneUniform // Layout matches pbrForward.vert
     alignas(16) glm::vec4 temporalJitter = glm::vec4(0.0f);
     // x=history reset, y=frame index, z=render width, w=render height
     alignas(16) glm::vec4 temporalParams = glm::vec4(1.0f, 0.0f, 1.0f, 1.0f);
-    // x=current exposure, y=previous exposure
+    // x=current exposure, y=previous exposure, z=stationary-camera temporal lock
     alignas(16) glm::vec4 temporalExposure = glm::vec4(1.0f);
 };
 
@@ -339,6 +339,7 @@ class Renderer
     glm::mat4 previousProjectionNoJitter_{1.0f};
     glm::vec2 previousJitterPixels_{0.0f};
     float previousExposure_{1.0f};
+    uint32_t stationaryCameraFrames_{0};
     uint32_t temporalRenderWidth_{1};
     uint32_t temporalRenderHeight_{1};
     unordered_map<const Mesh*, glm::mat4> previousMeshTransforms_{};
