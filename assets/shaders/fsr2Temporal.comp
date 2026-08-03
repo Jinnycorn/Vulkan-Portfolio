@@ -86,19 +86,20 @@ void main()
 
     vec2 uv = (vec2(pixel) + 0.5) / vec2(outputSize);
 
-    // The scene was rasterized with a sub-pixel projection offset. Re-center every
-    // current-frame input onto the stable, non-jittered output grid before temporal
-    // accumulation. Without this correction the 16-phase Halton pattern visibly moves
-    // the whole viewport even though the unjittered motion vector is zero.
+    // GLM's right-handed projection stores clip.w = -view.z. Therefore adding a
+    // positive offset to projection[2][0/1] moves the rasterized image in the
+    // negative UV direction. Sample in that same negative direction to place the
+    // jittered input back on the stable output grid.
     vec2 renderSize = vec2(textureSize(floatColor2, 0));
     vec2 currentJitterUv = sceneData.temporalJitter.xy / max(renderSize, vec2(1.0));
-    vec2 currentUv = clamp(uv + currentJitterUv, vec2(0.0), vec2(1.0));
+    vec2 halfTexel = 0.5 / max(renderSize, vec2(1.0));
+    vec2 currentUv = clamp(uv - currentJitterUv, halfTexel, vec2(1.0) - halfTexel);
 
     vec3 currentColor = sampleCurrent(currentUv);
     float currentDepth = texture(depthStencil, currentUv).r;
 
-    // Motion is previous-current unjittered NDC. History is stored on the stable output
-    // grid, so only motion is required here; current jitter has already been removed.
+    // Motion is previous-current NDC. Full-screen UV uses the same orientation, so half
+    // an NDC unit converts it to normalized texture coordinates.
     vec2 motion = texture(gMotion, currentUv).rg;
     vec2 previousUv = uv + motion * 0.5;
     float reactive = clamp(texture(gReactive, currentUv).r, 0.0, 1.0);
