@@ -99,6 +99,7 @@ struct PipelineConfig
     static PipelineConfig createCompute();
     static PipelineConfig createSsao();
     static PipelineConfig createDeferredLighting();
+    static PipelineConfig createFsr2Temporal();
     static PipelineConfig createTriangle();
 };
 
@@ -197,6 +198,14 @@ inline PipelineConfig PipelineConfig::createDeferredLighting()
 {
     PipelineConfig config;
     config.name = "deferredLighting";
+    config.type = Type::Compute;
+    return config;
+}
+
+inline PipelineConfig PipelineConfig::createFsr2Temporal()
+{
+    PipelineConfig config;
+    config.name = "fsr2Temporal";
     config.type = Type::Compute;
     return config;
 }
