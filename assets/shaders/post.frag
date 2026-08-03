@@ -39,6 +39,7 @@ layout (set = 0, binding = 1) uniform PostProcessingOptions {
 
 // Add depth buffer access for Bokeh effect
 layout (set = 0, binding = 2) uniform sampler2D depthStencil;
+layout (set = 0, binding = 3) uniform sampler2D temporalOutput;
 
 layout (location = 0) out vec4 outFragColor;
 
@@ -604,11 +605,13 @@ void main() {
     vec2 uv = inTexCoord;
     
     // Sample the original HDR color with optional chromatic aberration OR FXAA
-    vec3 originalColor = applyChromaticAberrationOrFXAA(uv);
+    vec3 originalColor = postOptions.nisEnabled == 0
+        ? texture(temporalOutput, uv).rgb
+        : applyChromaticAberrationOrFXAA(uv);
     
     // Apply Bokeh depth of field if enabled
     vec3 bokehParams = decodeBokehParams(postOptions.padding1);
-    if (bokehParams.z > 0.0) {
+    if (bokehParams.z > 0.0 && postOptions.nisEnabled != 0) {
         originalColor = applyBokeh(uv, bokehParams);
     }
     
