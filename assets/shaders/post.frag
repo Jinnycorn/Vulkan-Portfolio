@@ -309,6 +309,150 @@ float fxaaLuma(vec3 rgb) {
     return linearLuma / (1.0 + linearLuma);
 }
 
+// Full-resolution edge resolve for the temporally reconstructed FSR output.
+// The temporal pass removes frame-to-frame instability; this deterministic spatial
+// pass removes the remaining geometric stair steps without feeding filtered pixels
+// back into history. It follows the high-quality FXAA edge-endpoint search rather
+// than the short directional blur used by the low-cost fallback below.
+vec3 sampleTemporalOutput(vec2 uv) {
+    vec2 texelSize = 1.0 / vec2(textureSize(temporalOutput, 0));
+    vec2 halfTexel = texelSize * 0.5;
+    return texture(temporalOutput, clamp(uv, halfTexel, vec2(1.0) - halfTexel)).rgb;
+}
+
+vec3 resolveTemporalEdgesUltra(vec2 uv) {
+    vec2 texelSize = 1.0 / vec2(textureSize(temporalOutput, 0));
+
+    vec3 rgbM  = sampleTemporalOutput(uv);
+    vec3 rgbN  = sampleTemporalOutput(uv + vec2(0.0, -texelSize.y));
+    vec3 rgbS  = sampleTemporalOutput(uv + vec2(0.0,  texelSize.y));
+    vec3 rgbW  = sampleTemporalOutput(uv + vec2(-texelSize.x, 0.0));
+    vec3 rgbE  = sampleTemporalOutput(uv + vec2( texelSize.x, 0.0));
+    vec3 rgbNW = sampleTemporalOutput(uv + vec2(-texelSize.x, -texelSize.y));
+    vec3 rgbNE = sampleTemporalOutput(uv + vec2( texelSize.x, -texelSize.y));
+    vec3 rgbSW = sampleTemporalOutput(uv + vec2(-texelSize.x,  texelSize.y));
+    vec3 rgbSE = sampleTemporalOutput(uv + vec2( texelSize.x,  texelSize.y));
+
+    float lumaM  = fxaaLuma(rgbM);
+    float lumaN  = fxaaLuma(rgbN);
+    float lumaS  = fxaaLuma(rgbS);
+    float lumaW  = fxaaLuma(rgbW);
+    float lumaE  = fxaaLuma(rgbE);
+    float lumaNW = fxaaLuma(rgbNW);
+    float lumaNE = fxaaLuma(rgbNE);
+    float lumaSW = fxaaLuma(rgbSW);
+    float lumaSE = fxaaLuma(rgbSE);
+
+    float lumaMin = min(lumaM, min(min(min(lumaN, lumaS), min(lumaW, lumaE)),
+                                   min(min(lumaNW, lumaNE), min(lumaSW, lumaSE))));
+    float lumaMax = max(lumaM, max(max(max(lumaN, lumaS), max(lumaW, lumaE)),
+                                   max(max(lumaNW, lumaNE), max(lumaSW, lumaSE))));
+    float lumaRange = lumaMax - lumaMin;
+
+    // Aggressive but contrast-relative thresholds catch distant rails, roof lines and
+    // window frames. Flat surfaces leave here after the initial 3x3 neighborhood.
+    if (lumaRange < max(1.0 / 48.0, lumaMax * 0.045)) {
+        return rgbM;
+    }
+
+    float edgeHorizontal =
+        abs(-2.0 * lumaN + lumaNW + lumaNE) +
+        2.0 * abs(-2.0 * lumaM + lumaW + lumaE) +
+        abs(-2.0 * lumaS + lumaSW + lumaSE);
+    float edgeVertical =
+        abs(-2.0 * lumaW + lumaNW + lumaSW) +
+        2.0 * abs(-2.0 * lumaM + lumaN + lumaS) +
+        abs(-2.0 * lumaE + lumaNE + lumaSE);
+    bool horizontal = edgeHorizontal >= edgeVertical;
+
+    float lumaSide1 = horizontal ? lumaN : lumaW;
+    float lumaSide2 = horizontal ? lumaS : lumaE;
+    float gradient1 = abs(lumaSide1 - lumaM);
+    float gradient2 = abs(lumaSide2 - lumaM);
+    bool side1Steeper = gradient1 >= gradient2;
+    float scaledGradient = max(gradient1, gradient2) * 0.25;
+
+    float normalStep = horizontal ? texelSize.y : texelSize.x;
+    float lumaLocalAverage;
+    if (side1Steeper) {
+        normalStep = -normalStep;
+        lumaLocalAverage = 0.5 * (lumaSide1 + lumaM);
+    } else {
+        lumaLocalAverage = 0.5 * (lumaSide2 + lumaM);
+    }
+
+    vec2 edgeUv = uv;
+    if (horizontal) {
+        edgeUv.y += normalStep * 0.5;
+    } else {
+        edgeUv.x += normalStep * 0.5;
+    }
+
+    vec2 tangentStep = horizontal ? vec2(texelSize.x, 0.0)
+                                  : vec2(0.0, texelSize.y);
+    vec2 endpointUv1 = edgeUv - tangentStep;
+    vec2 endpointUv2 = edgeUv + tangentStep;
+    float endpointLuma1 = fxaaLuma(sampleTemporalOutput(endpointUv1)) - lumaLocalAverage;
+    float endpointLuma2 = fxaaLuma(sampleTemporalOutput(endpointUv2)) - lumaLocalAverage;
+    bool endpointFound1 = abs(endpointLuma1) >= scaledGradient;
+    bool endpointFound2 = abs(endpointLuma2) >= scaledGradient;
+
+    // Quality preset: search up to 12 output pixels in both directions. The loop exits
+    // independently on each side, keeping the common short-edge case inexpensive.
+    for (int stepIndex = 0; stepIndex < 12; ++stepIndex) {
+        if (!endpointFound1) {
+            endpointUv1 -= tangentStep;
+            endpointLuma1 =
+                fxaaLuma(sampleTemporalOutput(endpointUv1)) - lumaLocalAverage;
+            endpointFound1 = abs(endpointLuma1) >= scaledGradient;
+        }
+        if (!endpointFound2) {
+            endpointUv2 += tangentStep;
+            endpointLuma2 =
+                fxaaLuma(sampleTemporalOutput(endpointUv2)) - lumaLocalAverage;
+            endpointFound2 = abs(endpointLuma2) >= scaledGradient;
+        }
+        if (endpointFound1 && endpointFound2) {
+            break;
+        }
+    }
+
+    float distance1 = horizontal ? abs(uv.x - endpointUv1.x)
+                                 : abs(uv.y - endpointUv1.y);
+    float distance2 = horizontal ? abs(endpointUv2.x - uv.x)
+                                 : abs(endpointUv2.y - uv.y);
+    bool endpoint1Closer = distance1 < distance2;
+    float closestDistance = min(distance1, distance2);
+    float edgeLength = max(distance1 + distance2, 1.0e-6);
+    float edgeOffset = 0.5 - closestDistance / edgeLength;
+
+    float closestEndpointLuma = endpoint1Closer ? endpointLuma1 : endpointLuma2;
+    bool centerIsDarker = lumaM < lumaLocalAverage;
+    bool endpointVariationCorrect = (closestEndpointLuma < 0.0) != centerIsDarker;
+    if (!endpointVariationCorrect) {
+        edgeOffset = 0.0;
+    }
+
+    // Sub-pixel coverage handles isolated one-pixel steps that have no long endpoint.
+    float neighborhoodLuma =
+        (2.0 * (lumaN + lumaS + lumaW + lumaE) +
+         lumaNW + lumaNE + lumaSW + lumaSE) / 12.0;
+    float subpixelOffset =
+        clamp(abs(neighborhoodLuma - lumaM) / max(lumaRange, 1.0e-5), 0.0, 1.0);
+    subpixelOffset = subpixelOffset * subpixelOffset *
+                     (3.0 - 2.0 * subpixelOffset);
+    subpixelOffset = subpixelOffset * subpixelOffset * 0.88;
+
+    float finalOffset = max(edgeOffset, subpixelOffset);
+    vec2 finalUv = uv;
+    if (horizontal) {
+        finalUv.y += finalOffset * normalStep;
+    } else {
+        finalUv.x += finalOffset * normalStep;
+    }
+    return sampleTemporalOutput(finalUv);
+}
+
 // Directional 9-tap FXAA. Strength adjusts edge sensitivity and final coverage,
 // while the tap count stays fixed so frame cost is predictable on low-VRAM GPUs.
 vec3 fxaaAdvanced(vec2 uv, float fxaaStrength) {
@@ -604,9 +748,10 @@ vec3 visualizeBokehDebug(vec2 uv, vec3 bokehParams) {
 void main() {
     vec2 uv = inTexCoord;
     
-    // Sample the original HDR color with optional chromatic aberration OR FXAA
+    // FSR already provides temporal stability. Resolve the remaining silhouette and
+    // sub-pixel stair steps at presentation resolution, after temporal reconstruction.
     vec3 originalColor = postOptions.nisEnabled == 0
-        ? texture(temporalOutput, uv).rgb
+        ? resolveTemporalEdgesUltra(uv)
         : applyChromaticAberrationOrFXAA(uv);
     
     // Apply Bokeh depth of field if enabled
