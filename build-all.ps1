@@ -62,6 +62,32 @@ if ([string]::IsNullOrWhiteSpace($vulkanSdk) -or
 $env:VULKAN_SDK = $vulkanSdk
 $env:Path = "$(Join-Path $vulkanSdk "Bin");$env:Path"
 
+# Always rebuild SPIR-V from the checked-in GLSL sources. Temporal upscaling changes the
+# reflected descriptor layouts, G-buffer attachment count and vertex outputs together;
+# stale .spv files would otherwise make the Vulkan layouts disagree with the C++ code.
+$glslang = Join-Path $vulkanSdk "Bin\glslangValidator.exe"
+if (-not (Test-Path $glslang)) {
+    throw "glslangValidator.exe was not found in the Vulkan SDK."
+}
+$shaderRoot = Join-Path $repoRoot "assets\shaders"
+$temporalShaderNames = @(
+    "pbrForward.vert",
+    "pbrDeferred.frag",
+    "post.frag",
+    "fsr2Temporal.comp"
+)
+$shaderSources = $temporalShaderNames | ForEach-Object {
+    Get-Item (Join-Path $shaderRoot $_)
+}
+Write-Host "Compiling Vulkan shaders ..."
+foreach ($shader in $shaderSources) {
+    $spvPath = "$($shader.FullName).spv"
+    & $glslang -V --target-env vulkan1.2 $shader.FullName -o $spvPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Shader compilation failed: $($shader.Name)"
+    }
+}
+
 New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
 if (-not (Test-Path (Join-Path $vcpkgRoot ".git"))) {
     Write-Host "Cloning vcpkg ..."
