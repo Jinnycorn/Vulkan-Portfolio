@@ -85,14 +85,23 @@ void main()
     }
 
     vec2 uv = (vec2(pixel) + 0.5) / vec2(outputSize);
-    vec3 currentColor = sampleCurrent(uv);
-    float currentDepth = texture(depthStencil, uv).r;
 
-    // Motion is previous-current NDC. Full-screen UV uses the same orientation, so half
-    // an NDC unit converts it to normalized texture coordinates.
-    vec2 motion = texture(gMotion, uv).rg;
+    // The scene was rasterized with a sub-pixel projection offset. Re-center every
+    // current-frame input onto the stable, non-jittered output grid before temporal
+    // accumulation. Without this correction the 16-phase Halton pattern visibly moves
+    // the whole viewport even though the unjittered motion vector is zero.
+    vec2 renderSize = vec2(textureSize(floatColor2, 0));
+    vec2 currentJitterUv = sceneData.temporalJitter.xy / max(renderSize, vec2(1.0));
+    vec2 currentUv = clamp(uv + currentJitterUv, vec2(0.0), vec2(1.0));
+
+    vec3 currentColor = sampleCurrent(currentUv);
+    float currentDepth = texture(depthStencil, currentUv).r;
+
+    // Motion is previous-current unjittered NDC. History is stored on the stable output
+    // grid, so only motion is required here; current jitter has already been removed.
+    vec2 motion = texture(gMotion, currentUv).rg;
     vec2 previousUv = uv + motion * 0.5;
-    float reactive = clamp(texture(gReactive, uv).r, 0.0, 1.0);
+    float reactive = clamp(texture(gReactive, currentUv).r, 0.0, 1.0);
 
     bool reset = sceneData.temporalParams.x > 0.5 || postOptions.nisEnabled != 0;
     bool outside = any(lessThan(previousUv, vec2(0.0))) ||
@@ -108,7 +117,7 @@ void main()
 
         vec3 minimumColor;
         vec3 maximumColor;
-        neighborhoodBounds(uv, minimumColor, maximumColor);
+        neighborhoodBounds(currentUv, minimumColor, maximumColor);
         history = clamp(history, minimumColor, maximumColor);
 
         float depthDelta = abs(previousDepth - currentDepth);
