@@ -31,6 +31,15 @@ struct SceneUniform // Layout matches pbrForward.vert
     alignas(16) glm::vec3 directionalLightDir = glm::vec3(0.0f, 1.0f, 0.0f); // 16 bytes
     alignas(16) glm::vec3 directionalLightColor = glm::vec3(1.0f);
     alignas(16) glm::mat4 lightSpaceMatrix = glm::mat4(1.0f); // 64 bytes - for shadow mapping
+    alignas(16) glm::mat4 projectionNoJitter = glm::mat4(1.0f);
+    alignas(16) glm::mat4 previousProjectionNoJitter = glm::mat4(1.0f);
+    alignas(16) glm::mat4 previousView = glm::mat4(1.0f);
+    // xy=current jitter (pixels), zw=previous jitter (pixels)
+    alignas(16) glm::vec4 temporalJitter = glm::vec4(0.0f);
+    // x=history reset, y=frame index, z=render width, w=render height
+    alignas(16) glm::vec4 temporalParams = glm::vec4(1.0f, 0.0f, 1.0f, 1.0f);
+    // x=current exposure, y=previous exposure
+    alignas(16) glm::vec4 temporalExposure = glm::vec4(1.0f);
 };
 
 struct SkyOptionsUBO
@@ -87,7 +96,8 @@ struct PostOptionsUBO
 
     // Low-VRAM NVIDIA Image Scaling style spatial upscaler.
     // It runs in the existing post pass, so it does not allocate another full-resolution image.
-    alignas(4) int nisEnabled = 1;
+    // 0 = AMD FSR 2.2 temporal path (default), 1 = NVIDIA NIS spatial path.
+    alignas(4) int nisEnabled = 0;
     alignas(4) float nisSharpness = 0.35f;
     alignas(4) float nisScaleThreshold = 1.01f;
     alignas(4) float nisPadding = 0.0f;
@@ -107,11 +117,12 @@ struct SsaoOptionsUBO
 struct BoneDataUniform
 {
     alignas(16) glm::mat4 boneMatrices[65]; // 4,160 bytes (already 16-byte aligned)
+    alignas(16) glm::mat4 previousBoneMatrices[65];
     alignas(16) glm::vec4 animationData;    // x = hasAnimation (0.0/1.0), y,z,w = future use
 };
 
 static_assert(sizeof(BoneDataUniform) % 16 == 0, "BoneDataUniform must be 16-byte aligned");
-static_assert(sizeof(BoneDataUniform) == 65 * 64 + 16, "Unexpected BoneDataUniform size");
+static_assert(sizeof(BoneDataUniform) == 2 * 65 * 64 + 16, "Unexpected BoneDataUniform size");
 
 // Push constants structure for PBR forward rendering
 struct PbrPushConstants
@@ -154,6 +165,9 @@ class Renderer
     void updateBoneData(const vector<unique_ptr<Model>>& models, uint32_t currentFrame);
     void draw(VkCommandBuffer cmd, uint32_t currentFrame, VkImageView swapchainImageView,
               vector<unique_ptr<Model>>& models, VkViewport viewport, VkRect2D scissor);
+    void invalidateTemporalHistory();
+    void setUpscalerMode(int mode);
+    int upscalerMode() const { return postOptionsUBO_.nisEnabled; }
 
     // View frustum culling
     auto getCullingStats() const -> const CullingStats&;
@@ -257,6 +271,25 @@ class Renderer
     void addResource(string resourceName, uint32_t frameNumber,
                      vector<reference_wrapper<Resource>>& resources)
     {
+        // Temporal history is ping-ponged by frame-in-flight. Keeping these aliases here lets
+        // shader reflection retain stable FSR-style names while each descriptor set receives
+        // the correct previous/current surface.
+        if (resourceName == "historyColorPrev") {
+            resources.push_back(*imageBuffers_[frameNumber == 0 ? "historyColor1" : "historyColor0"]);
+            return;
+        }
+        if (resourceName == "historyColorCurrent") {
+            resources.push_back(*imageBuffers_[frameNumber == 0 ? "historyColor0" : "historyColor1"]);
+            return;
+        }
+        if (resourceName == "historyDepthPrev") {
+            resources.push_back(*imageBuffers_[frameNumber == 0 ? "historyDepth1" : "historyDepth0"]);
+            return;
+        }
+        if (resourceName == "historyDepthCurrent") {
+            resources.push_back(*imageBuffers_[frameNumber == 0 ? "historyDepth0" : "historyDepth1"]);
+            return;
+        }
         if (perFrameUniformBuffers_.find(resourceName) != perFrameUniformBuffers_.end()) {
             resources.push_back(*perFrameUniformBuffers_[resourceName][frameNumber]);
             return;
@@ -299,6 +332,16 @@ class Renderer
     float lod1PixelThreshold_{110.0f};
     float lod2PixelThreshold_{36.0f};
     float lodCullPixelThreshold_{2.0f};
+
+    bool temporalHistoryValid_{false};
+    bool temporalModeChanged_{false};
+    glm::mat4 previousView_{1.0f};
+    glm::mat4 previousProjectionNoJitter_{1.0f};
+    glm::vec2 previousJitterPixels_{0.0f};
+    float previousExposure_{1.0f};
+    uint32_t temporalRenderWidth_{1};
+    uint32_t temporalRenderHeight_{1};
+    unordered_map<const Mesh*, glm::mat4> previousMeshTransforms_{};
 
     void createOcclusionResources(const vector<unique_ptr<Model>>& models);
     void resolveOcclusionQueries(uint32_t currentFrame);
