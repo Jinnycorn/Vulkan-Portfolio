@@ -81,21 +81,16 @@ vec3 yCoCgToRgb(vec3 color)
 // Variance clipping is deliberately performed in a luminance/chroma space. The old
 // per-channel min/max box changed abruptly whenever a sub-pixel window frame or brick
 // entered/leaved the 3x3 footprint, continuously discarding otherwise valid history.
-void neighborhoodStatistics(vec2 uv, out vec3 mean, out vec3 sigma,
-                            out vec3 minimumColor, out vec3 maximumColor)
+void neighborhoodStatistics(vec2 uv, out vec3 mean, out vec3 sigma)
 {
     vec2 texel = 1.0 / vec2(textureSize(floatColor2, 0));
     mean = vec3(0.0);
     vec3 secondMoment = vec3(0.0);
-    minimumColor = vec3(1e20);
-    maximumColor = vec3(-1e20);
     for (int y = -1; y <= 1; ++y) {
         for (int x = -1; x <= 1; ++x) {
             vec3 value = rgbToYCoCg(sampleCurrent(uv + vec2(x, y) * texel));
             mean += value;
             secondMoment += value * value;
-            minimumColor = min(minimumColor, value);
-            maximumColor = max(maximumColor, value);
         }
     }
     mean *= 1.0 / 9.0;
@@ -128,6 +123,14 @@ void main()
     // Motion is previous-current NDC. Full-screen UV uses the same orientation, so half
     // an NDC unit converts it to normalized texture coordinates.
     vec2 motion = texture(gMotion, currentUv).rg;
+    float stationaryLock = clamp(sceneData.temporalExposure.z, 0.0, 1.0);
+    // Half-float motion targets can retain tiny non-zero values on otherwise static
+    // geometry. At output resolution those values make history walk between adjacent
+    // texels. Remove only sub-quarter-pixel motion while the camera lock is active.
+    vec2 motionPixels = motion * 0.5 * vec2(outputSize);
+    if (stationaryLock > 0.5 && length(motionPixels) < 0.25) {
+        motion = vec2(0.0);
+    }
     vec2 previousUv = uv + motion * 0.5;
     float reactive = clamp(texture(gReactive, currentUv).r, 0.0, 1.0);
 
@@ -145,18 +148,20 @@ void main()
 
         vec3 mean;
         vec3 sigma;
-        vec3 minimumColor;
-        vec3 maximumColor;
-        neighborhoodStatistics(currentUv, mean, sigma, minimumColor, maximumColor);
+        neighborhoodStatistics(currentUv, mean, sigma);
 
         vec3 historyYCoCg = rgbToYCoCg(history);
         vec3 currentYCoCg = rgbToYCoCg(currentColor);
         // A wider luminance interval preserves stable sub-pixel geometry; tighter chroma
-        // bounds still prevent colored ghost trails. The min/max intersection retains
-        // robust anti-ringing around silhouettes without the old hard-clamp flicker.
-        vec3 gamma = vec3(1.60, 1.15, 1.15);
-        vec3 clipMinimum = max(mean - gamma * sigma, minimumColor);
-        vec3 clipMaximum = min(mean + gamma * sigma, maximumColor);
+        // bounds still prevent colored ghost trails.
+        vec3 gamma = mix(vec3(1.60, 1.15, 1.15),
+                         vec3(2.60, 1.60, 1.60), stationaryLock);
+        // The old min/max intersection reintroduced the same frame-dependent hard box
+        // that variance clipping was meant to replace. A wider statistical interval is
+        // stable for static sub-pixel geometry while reactive/depth rejection still
+        // handles genuinely changing pixels.
+        vec3 clipMinimum = mean - gamma * sigma;
+        vec3 clipMaximum = mean + gamma * sigma;
         historyYCoCg = clamp(historyYCoCg, clipMinimum, clipMaximum);
         history = yCoCgToRgb(historyYCoCg);
 
@@ -166,10 +171,11 @@ void main()
         float luminanceDelta = abs(historyYCoCg.x - currentYCoCg.x) /
             max(max(historyYCoCg.x, currentYCoCg.x), 0.08);
         float temporalInstability = smoothstep(0.10, 0.65, luminanceDelta);
-        float historyWeight = 0.965 * (1.0 - reactive) *
+        float baseHistoryWeight = mix(0.965, 0.992, stationaryLock);
+        float historyWeight = baseHistoryWeight * (1.0 - reactive) *
             (1.0 - disocclusion) * (1.0 - 0.55 * motionRejection) *
             (1.0 - 0.20 * temporalInstability);
-        resolved = mix(currentColor, history, clamp(historyWeight, 0.0, 0.97));
+        resolved = mix(currentColor, history, clamp(historyWeight, 0.0, 0.995));
     }
 
     imageStore(temporalOutput, pixel, vec4(resolved, 1.0));
