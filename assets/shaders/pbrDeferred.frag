@@ -8,6 +8,8 @@ layout(location = 3) in vec3 fragTangent;
 layout(location = 4) in vec3 fragBitangent;
 layout(location = 5) in vec3 fragCameraPos;
 layout(location = 6) in vec4 fragPosLightSpace;
+layout(location = 7) in vec4 currentClipNoJitter;
+layout(location = 8) in vec4 previousClipNoJitter;
 
 layout(push_constant) uniform PushConstants {
     mat4 model;
@@ -64,6 +66,8 @@ layout(location = 0) out vec4 gAlbedo;      // RGB: albedo/baseColor, A: metalli
 layout(location = 1) out vec4 gNormal;      // RGB: world-space normal (encoded), A: roughness
 layout(location = 2) out vec4 gPosition;    // RGB: world-space position, A: depth
 layout(location = 3) out vec4 gMaterial;    // R: AO, G: emissive intensity, B: material ID, A: unused
+layout(location = 4) out vec2 gMotion;      // Current pixel to previous pixel in NDC units
+layout(location = 5) out float gReactive;   // Alpha/emissive response for temporal rejection
 
 // Normal encoding function for G-buffer
 vec3 encodeNormal(vec3 normal) {
@@ -84,16 +88,18 @@ void main() {
                         texture(materialTextures[nonuniformEXT(material.baseColorTextureIndex)], fragTexCoord) : 
                         vec4(1.0);
 
+    float sampledOpacity = baseColorRGBA.a * material.transparencyFactor;
     if(options.discardOn != 0 && material.opacityTextureIndex >= 0)
     {
         float opacity = texture(materialTextures[nonuniformEXT(material.opacityTextureIndex)], fragTexCoord).r;
+        sampledOpacity *= opacity;
         if(opacity < 0.08)
             discard;
     }
 
     vec3 baseColor = material.baseColorFactor.rgb * baseColorRGBA.rgb;
-    float metallic = material.metallicFactor * pushConstants.coeffs[4];
-    float roughness = material.roughnessFactor * pushConstants.coeffs[5];
+    float metallic = material.metallicFactor * pushConstants.coeffs[3];
+    float roughness = material.roughnessFactor * pushConstants.coeffs[4];
 
     if(options.textureOn != 0 && material.metallicRoughnessTextureIndex >= 0){
         vec3 metallicRoughness = texture(materialTextures[nonuniformEXT(material.metallicRoughnessTextureIndex)], fragTexCoord).rgb;
@@ -135,4 +141,11 @@ void main() {
     gNormal = vec4(encodeNormal(N), roughness);
     gPosition = vec4(fragPos, gl_FragCoord.z);
     gMaterial = vec4(ao, emissiveIntensity, float(pushConstants.materialIndex) / 255.0, 1.0);
+    vec2 currentNdc = currentClipNoJitter.xy / max(abs(currentClipNoJitter.w), 1e-6);
+    vec2 previousNdc = previousClipNoJitter.xy / max(abs(previousClipNoJitter.w), 1e-6);
+    gMotion = previousNdc - currentNdc;
+
+    float opacityReactivity = clamp(1.0 - sampledOpacity, 0.0, 1.0);
+    float emissiveReactivity = clamp(emissiveIntensity * 0.25, 0.0, 0.85);
+    gReactive = max(opacityReactivity, emissiveReactivity);
 }
