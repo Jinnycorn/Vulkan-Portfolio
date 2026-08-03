@@ -365,6 +365,56 @@ vec3 resolveTemporalEdgesUltra(vec2 uv) {
         abs(-2.0 * lumaE + lumaNE + lumaSE);
     bool horizontal = edgeHorizontal >= edgeVertical;
 
+    // Keep a continuous edge normal instead of reducing every silhouette to either
+    // horizontal or vertical. The old binary choice left visible pixel stairs on
+    // oblique roof lines and at the corners of windows and building silhouettes.
+    vec2 sobelGradient = vec2(
+        (lumaNE + 2.0 * lumaE + lumaSE) -
+        (lumaNW + 2.0 * lumaW + lumaSW),
+        (lumaSW + 2.0 * lumaS + lumaSE) -
+        (lumaNW + 2.0 * lumaN + lumaNE));
+    float sobelLength = length(sobelGradient);
+    vec2 continuousNormal = sobelLength > 1.0e-6
+        ? sobelGradient / sobelLength
+        : (horizontal ? vec2(0.0, 1.0) : vec2(1.0, 0.0));
+
+    // A structure tensor distinguishes a real corner (two strong gradient axes)
+    // from a straight diagonal edge (one coherent axis). Only true corners receive
+    // the wider area-coverage resolve below, so flat texture detail stays sharp.
+    vec2 gradientNW = 0.5 * vec2(
+        (lumaN + lumaM) - (lumaNW + lumaW),
+        (lumaW + lumaM) - (lumaNW + lumaN));
+    vec2 gradientNE = 0.5 * vec2(
+        (lumaNE + lumaE) - (lumaN + lumaM),
+        (lumaM + lumaE) - (lumaN + lumaNE));
+    vec2 gradientSW = 0.5 * vec2(
+        (lumaM + lumaS) - (lumaW + lumaSW),
+        (lumaSW + lumaS) - (lumaW + lumaM));
+    vec2 gradientSE = 0.5 * vec2(
+        (lumaE + lumaSE) - (lumaM + lumaS),
+        (lumaS + lumaSE) - (lumaM + lumaE));
+
+    float tensorXX = dot(vec4(gradientNW.x, gradientNE.x,
+                              gradientSW.x, gradientSE.x),
+                         vec4(gradientNW.x, gradientNE.x,
+                              gradientSW.x, gradientSE.x));
+    float tensorYY = dot(vec4(gradientNW.y, gradientNE.y,
+                              gradientSW.y, gradientSE.y),
+                         vec4(gradientNW.y, gradientNE.y,
+                              gradientSW.y, gradientSE.y));
+    float tensorXY = dot(vec4(gradientNW.x, gradientNE.x,
+                              gradientSW.x, gradientSE.x),
+                         vec4(gradientNW.y, gradientNE.y,
+                              gradientSW.y, gradientSE.y));
+    float tensorTrace = tensorXX + tensorYY;
+    float tensorDiscriminant = sqrt(max(
+        tensorTrace * tensorTrace -
+        4.0 * max(tensorXX * tensorYY - tensorXY * tensorXY, 0.0), 0.0));
+    float lambdaMin = 0.5 * (tensorTrace - tensorDiscriminant);
+    float lambdaMax = 0.5 * (tensorTrace + tensorDiscriminant);
+    float cornerRatio = lambdaMin / max(lambdaMax, 1.0e-6);
+    float cornerConfidence = smoothstep(0.035, 0.20, cornerRatio);
+
     float lumaSide1 = horizontal ? lumaN : lumaW;
     float lumaSide2 = horizontal ? lumaS : lumaE;
     float gradient1 = abs(lumaSide1 - lumaM);
@@ -444,13 +494,43 @@ vec3 resolveTemporalEdgesUltra(vec2 uv) {
     subpixelOffset = subpixelOffset * subpixelOffset * 0.88;
 
     float finalOffset = max(edgeOffset, subpixelOffset);
-    vec2 finalUv = uv;
-    if (horizontal) {
-        finalUv.y += finalOffset * normalStep;
-    } else {
-        finalUv.x += finalOffset * normalStep;
+    vec2 axisNormal = horizontal
+        ? vec2(0.0, normalStep < 0.0 ? -1.0 : 1.0)
+        : vec2(normalStep < 0.0 ? -1.0 : 1.0, 0.0);
+    if (dot(continuousNormal, axisNormal) < 0.0) {
+        continuousNormal = -continuousNormal;
     }
-    return sampleTemporalOutput(finalUv);
+
+    // Blend toward the real sub-pixel normal as the edge becomes diagonal. This
+    // prevents the one-pixel horizontal/vertical jumps that formed a saw-tooth line.
+    vec2 absoluteNormal = abs(continuousNormal);
+    float diagonalAmount = min(absoluteNormal.x, absoluteNormal.y) /
+                           max(max(absoluteNormal.x, absoluteNormal.y), 1.0e-6);
+    float continuousWeight = smoothstep(0.08, 0.42, diagonalAmount) * 0.90;
+    vec2 resolvedNormal = normalize(mix(axisNormal, continuousNormal,
+                                        continuousWeight));
+    vec2 finalUv = uv + resolvedNormal * texelSize * finalOffset;
+    vec3 lineResolved = sampleTemporalOutput(finalUv);
+
+    // Four rotated-grid coverage samples approximate the fractional pixel area at
+    // diagonal steps and corners. This runs only after a confirmed edge and blends
+    // most strongly at true corners, avoiding a full-screen softening pass.
+    vec3 areaResolved =
+        sampleTemporalOutput(finalUv + texelSize * vec2(-0.375, -0.125)) +
+        sampleTemporalOutput(finalUv + texelSize * vec2( 0.125, -0.375)) +
+        sampleTemporalOutput(finalUv + texelSize * vec2( 0.375,  0.125)) +
+        sampleTemporalOutput(finalUv + texelSize * vec2(-0.125,  0.375));
+    areaResolved *= 0.25;
+
+    vec3 neighborhoodMin = min(rgbM, min(min(min(rgbN, rgbS), min(rgbW, rgbE)),
+                                         min(min(rgbNW, rgbNE), min(rgbSW, rgbSE))));
+    vec3 neighborhoodMax = max(rgbM, max(max(max(rgbN, rgbS), max(rgbW, rgbE)),
+                                         max(max(rgbNW, rgbNE), max(rgbSW, rgbSE))));
+    areaResolved = clamp(areaResolved, neighborhoodMin, neighborhoodMax);
+
+    float areaCoverage = clamp(diagonalAmount * 0.45 +
+                               cornerConfidence * 0.55, 0.0, 0.86);
+    return mix(lineResolved, areaResolved, areaCoverage);
 }
 
 // Directional 9-tap FXAA. Strength adjusts edge sensitivity and final coverage,
