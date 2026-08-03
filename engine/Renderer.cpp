@@ -325,9 +325,23 @@ void Renderer::update(Camera& camera, vector<unique_ptr<Model>>& models, uint32_
 
     const glm::mat4 currentProjection = camera.matrices.perspective;
     const glm::mat4 currentView = camera.matrices.view;
+    const float viewDelta = maxMatrixDelta(currentView, previousView_);
+    const float projectionDelta = maxMatrixDelta(currentProjection, previousProjectionNoJitter_);
+    const bool cameraStationary = temporalHistoryValid_ &&
+        viewDelta < 1.0e-5f && projectionDelta < 1.0e-6f;
+    stationaryCameraFrames_ = cameraStationary ? stationaryCameraFrames_ + 1u : 0u;
+
+    // This lightweight temporal resolver does not have FSR2's full lock-status and
+    // reconstruction buffers. Repeating the Halton pattern forever therefore makes
+    // sub-pixel windows, roof lines and texture detail boil even with a still camera.
+    // Gather a short burst of sub-pixel samples, then hold the projection on the stable
+    // pixel grid until the camera moves again.
+    constexpr uint32_t kStationaryJitterSamples = 8u;
+    const bool stationaryTemporalLock = postOptionsUBO_.nisEnabled == 0 &&
+        stationaryCameraFrames_ >= kStationaryJitterSamples;
     const uint32_t jitterIndex = static_cast<uint32_t>(renderFrameCounter_ % 16u) + 1u;
     const glm::vec2 jitterPixels =
-        postOptionsUBO_.nisEnabled == 0
+        postOptionsUBO_.nisEnabled == 0 && !stationaryTemporalLock
             ? glm::vec2(halton(jitterIndex, 2u) - 0.5f, halton(jitterIndex, 3u) - 0.5f)
             : glm::vec2(0.0f);
 
@@ -335,7 +349,7 @@ void Renderer::update(Camera& camera, vector<unique_ptr<Model>>& models, uint32_
     jitteredProjection[2][0] += (2.0f * jitterPixels.x) / float(temporalRenderWidth_);
     jitteredProjection[2][1] += (2.0f * jitterPixels.y) / float(temporalRenderHeight_);
 
-    const bool cameraCut = temporalHistoryValid_ && maxMatrixDelta(currentView, previousView_) > 0.75f;
+    const bool cameraCut = temporalHistoryValid_ && viewDelta > 0.75f;
     const bool resetHistory = !temporalHistoryValid_ || temporalModeChanged_ || cameraCut;
     sceneUBO_.projection = jitteredProjection;
     sceneUBO_.view = currentView;
@@ -348,7 +362,8 @@ void Renderer::update(Camera& camera, vector<unique_ptr<Model>>& models, uint32_
     sceneUBO_.temporalParams = glm::vec4(resetHistory ? 1.0f : 0.0f,
         float(renderFrameCounter_), float(temporalRenderWidth_), float(temporalRenderHeight_));
     sceneUBO_.temporalExposure = glm::vec4(postOptionsUBO_.exposure,
-        resetHistory ? postOptionsUBO_.exposure : previousExposure_, 0.0f, 0.0f);
+        resetHistory ? postOptionsUBO_.exposure : previousExposure_,
+        stationaryTemporalLock ? 1.0f : 0.0f, 0.0f);
 
     {
         TRACY_CPU_SCOPE("Resolve Occlusion Queries");
@@ -451,6 +466,7 @@ void Renderer::invalidateTemporalHistory()
 {
     temporalHistoryValid_ = false;
     temporalModeChanged_ = true;
+    stationaryCameraFrames_ = 0;
 }
 
 void Renderer::setUpscalerMode(int mode)
