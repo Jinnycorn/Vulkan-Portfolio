@@ -19,6 +19,12 @@ layout(set = 0, binding = 0) uniform SceneDataUBO {
     vec3 directionalLightColor;
     float padding3;
     mat4 lightSpaceMatrix;
+    mat4 projectionNoJitter;
+    mat4 previousProjectionNoJitter;
+    mat4 previousView;
+    vec4 temporalJitter;
+    vec4 temporalParams;
+    vec4 temporalExposure;
 } sceneData;
 
 layout(set = 0, binding = 1) uniform OptionsUBO {
@@ -34,6 +40,7 @@ layout(set = 0, binding = 1) uniform OptionsUBO {
 
 layout(set = 0, binding = 2) uniform BoneDataUBO {
     mat4 boneMatrices[65];  // Support up to 65 bones (4,160 bytes)
+    mat4 previousBoneMatrices[65];
     vec4 animationData;      // x = hasAnimation (0.0/1.0), y,z,w = future use
 } boneData;
 
@@ -51,12 +58,36 @@ layout(location = 3) out vec3 fragTangent;
 layout(location = 4) out vec3 fragBitangent;
 layout(location = 5) out vec3 fragCameraPos;
 layout(location = 6) out vec4 fragPosLightSpace;
+layout(location = 7) out vec4 currentClipNoJitter;
+layout(location = 8) out vec4 previousClipNoJitter;
+
+mat4 unpackPreviousModel()
+{
+    vec3 translation = vec3(pushConstants.coeffs[5], pushConstants.coeffs[6],
+                            pushConstants.coeffs[7]);
+    vec4 q = normalize(vec4(pushConstants.coeffs[8], pushConstants.coeffs[9],
+                            pushConstants.coeffs[10], pushConstants.coeffs[11]));
+    vec3 scale = vec3(pushConstants.coeffs[12], pushConstants.coeffs[13],
+                      pushConstants.coeffs[14]);
+    float x = q.x, y = q.y, z = q.z, w = q.w;
+    mat3 rotation = mat3(
+        1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y + z * w), 2.0 * (x * z - y * w),
+        2.0 * (x * y - z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z + x * w),
+        2.0 * (x * z + y * w), 2.0 * (y * z - x * w), 1.0 - 2.0 * (x * x + y * y));
+    mat4 result = mat4(1.0);
+    result[0] = vec4(rotation[0] * scale.x, 0.0);
+    result[1] = vec4(rotation[1] * scale.y, 0.0);
+    result[2] = vec4(rotation[2] * scale.z, 0.0);
+    result[3] = vec4(translation, 1.0);
+    return result;
+}
 
 void main() {
     vec3 position = inPosition;
     vec3 normal = inNormal;
     vec3 tangent = inTangent;
     vec3 bitangent = inBitangent;
+    vec3 previousPosition = inPosition;
     
     bool animationApplied = false;
 
@@ -69,6 +100,7 @@ void main() {
         
         // Calculate animated position
         vec4 animatedPosition = vec4(0.0);
+        vec4 previousAnimatedPosition = vec4(0.0);
         vec3 animatedNormal = vec3(0.0);
         vec3 animatedTangent = vec3(0.0);
         vec3 animatedBitangent = vec3(0.0);
@@ -84,6 +116,8 @@ void main() {
                 
                 // Transform position
                 animatedPosition += weight * (boneMatrix * vec4(inPosition, 1.0));
+                previousAnimatedPosition +=
+                    weight * (boneData.previousBoneMatrices[boneIndex] * vec4(inPosition, 1.0));
                 
                 // Transform normal (using upper 3x3 matrix)
                 mat3 boneNormalMatrix = mat3(boneMatrix);
@@ -98,19 +132,16 @@ void main() {
         // Use animated attributes if any bone transformations were applied
         if (animatedPosition.w > 0.0) {
             position = animatedPosition.xyz;
+            previousPosition = previousAnimatedPosition.xyz;
             normal = normalize(animatedNormal);
             tangent = normalize(animatedTangent);
             bitangent = normalize(animatedBitangent);
         }
     }
     
-    // DEBUG: Apply a small offset if animation was applied (for visual debugging)
-    if (animationApplied && hasAnimationEnabled) {
-        position.y += sin(gl_VertexIndex * 0.1) * 0.01; // Small visual indicator
-    }
-
     // Transform vertex position to world space
     vec4 worldPos = pushConstants.model * vec4(position, 1.0);
+    vec4 previousWorldPos = unpackPreviousModel() * vec4(previousPosition, 1.0);
     fragPos = worldPos.xyz;
     
     const mat4 scaleBias = mat4(
@@ -132,6 +163,10 @@ void main() {
     // Pass through texture coordinates and camera position
     fragTexCoord = inTexCoord;
     fragCameraPos = sceneData.cameraPos;
+
+    currentClipNoJitter = sceneData.projectionNoJitter * sceneData.view * worldPos;
+    previousClipNoJitter =
+        sceneData.previousProjectionNoJitter * sceneData.previousView * previousWorldPos;
     
     // Transform vertex to clip space
     gl_Position = sceneData.projection * sceneData.view * worldPos;
