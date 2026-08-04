@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AudioEngine.h"
 #include "Camera.h"
 #include "Context.h"
 #include "Image2D.h"
@@ -262,6 +263,9 @@ class Application
 
     GuiRenderer guiRenderer_;
     unique_ptr<Renderer> renderer_;
+
+    AudioEngine audioEngine_;
+    float bgmVolume_{0.22f};
 
     // GPU timing
     GpuTimer gpuTimer_;
