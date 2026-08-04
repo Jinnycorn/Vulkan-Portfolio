@@ -3074,10 +3074,18 @@ void Application::renderCameraControlWindow()
                     camera_.viewPos.z);
 
         // Camera Type Toggle
-        bool isFirstPerson = camera_.type == hlab::Camera::CameraType::firstperson;
-        if (ImGui::Checkbox("First Person Mode", &isFirstPerson)) {
-            camera_.type = isFirstPerson ? hlab::Camera::CameraType::firstperson
-                                         : hlab::Camera::CameraType::lookat;
+        bool thirdPerson = thirdPersonEnabled_;
+        if (ImGui::Checkbox("Third Person Follow", &thirdPerson)) {
+            thirdPersonEnabled_ = thirdPerson;
+            if (thirdPersonEnabled_) {
+                if (thirdPersonModelIndex_ < 0) {
+                    initializeThirdPersonController();
+                } else {
+                    updateThirdPersonCamera();
+                }
+            } else {
+                camera_.type = hlab::Camera::CameraType::firstperson;
+            }
         }
     }
 
@@ -3175,9 +3183,10 @@ void Application::renderCameraControlWindow()
     // Controls Information
     if (ImGui::CollapsingHeader("Controls Help")) {
         ImGui::Text("Keyboard Controls:");
-        ImGui::BulletText("WASD: Move forward/back/left/right");
-        ImGui::BulletText("Q/E: Move up/down");
-        ImGui::BulletText("F2: Toggle camera mode");
+        ImGui::BulletText("WASD: Move the temporary player asset");
+        ImGui::BulletText("Right mouse drag: Orbit camera");
+        ImGui::BulletText("Mouse wheel: Zoom");
+        ImGui::BulletText("F2: Toggle third-person follow");
         ImGui::BulletText("F3: Print camera info to console");
         ImGui::BulletText("F4: Toggle frustum culling");
         ImGui::BulletText("F5: Toggle GPU occlusion culling");
