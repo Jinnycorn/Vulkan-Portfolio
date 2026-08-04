@@ -1366,8 +1366,11 @@ void Application::renderMainMenuBar()
 
             ImGui::Separator();
             ImGui::TextDisabled("Ambient BGM");
+            int volumePercent =
+                static_cast<int>(std::round(bgmVolume_ * 100.0f));
             ImGui::SetNextItemWidth(170.0f);
-            if (ImGui::SliderFloat("Volume", &bgmVolume_, 0.0f, 1.0f, "%.0f%%")) {
+            if (ImGui::SliderInt("Volume", &volumePercent, 0, 100, "%d%%")) {
+                bgmVolume_ = float(volumePercent) / 100.0f;
                 audioEngine_.setVolume(bgmVolume_);
             }
 
