@@ -4,6 +4,8 @@ find_package(imguizmo CONFIG REQUIRED)
 add_library(Engine STATIC
     Animation.cpp
     Animation.h
+    AudioEngine.cpp
+    AudioEngine.h
     Application.cpp
     Application.h
     BarrierHelper.cpp
@@ -136,6 +138,11 @@ if(TARGET imgui::imgui)
 endif()
 
 target_link_libraries(Engine PUBLIC imguizmo::imguizmo)
+
+if(WIN32)
+    # XAudio2 ships with the Windows SDK and needs no extra runtime package.
+    target_link_libraries(Engine PUBLIC xaudio2)
+endif()
 
 # Handle spirv-reflect with multiple possible target names
 if(TARGET unofficial::spirv-reflect)
