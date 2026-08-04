@@ -13,6 +13,8 @@
 #include <chrono>
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
+#include <vector>
 
 namespace hlab {
 
@@ -46,41 +48,58 @@ bool finitePoint(const glm::vec3& point)
     return std::isfinite(point.x) && std::isfinite(point.y) && std::isfinite(point.z);
 }
 
-void drawMeshThumbnail(ImDrawList* drawList, const Mesh& mesh, const ImVec2& topLeft,
-                       float thumbnailSize, bool visible)
+struct ThumbnailRaster
 {
-    const ImVec2 bottomRight(topLeft.x + thumbnailSize, topLeft.y + thumbnailSize);
-    drawList->PushClipRect(topLeft, bottomRight, true);
+    static constexpr int kResolution = 80;
+
+    size_t vertexCount = 0;
+    size_t indexCount = 0;
+    std::vector<uint8_t> shade;
+};
+
+float thumbnailEdge(const glm::vec2& a, const glm::vec2& b, const glm::vec2& point)
+{
+    return (point.x - a.x) * (b.y - a.y) -
+           (point.y - a.y) * (b.x - a.x);
+}
+
+ThumbnailRaster buildMeshThumbnail(const Mesh& mesh)
+{
+    ThumbnailRaster raster;
+    raster.vertexCount = mesh.vertices_.size();
+    raster.indexCount = mesh.indices_.size();
+    raster.shade.assign(
+        ThumbnailRaster::kResolution * ThumbnailRaster::kResolution, uint8_t(0));
 
     if (mesh.vertices_.empty() || mesh.indices_.size() < 3) {
-        const float inset = thumbnailSize * 0.28f;
-        drawList->AddRectFilled(
-            ImVec2(topLeft.x + inset, topLeft.y + inset),
-            ImVec2(bottomRight.x - inset, bottomRight.y - inset),
-            visible ? IM_COL32(126, 145, 160, 255) : IM_COL32(74, 80, 86, 255), 3.0f);
-        drawList->PopClipRect();
-        return;
+        return raster;
     }
 
-    glm::vec3 boundsMin = mesh.minBounds;
-    glm::vec3 boundsMax = mesh.maxBounds;
-    if (!finitePoint(boundsMin) || !finitePoint(boundsMax) ||
-        glm::any(glm::lessThanEqual(boundsMax, boundsMin))) {
-        boundsMin = glm::vec3(FLT_MAX);
-        boundsMax = glm::vec3(-FLT_MAX);
-        for (const Vertex& vertex : mesh.vertices_) {
-            const glm::vec3 position = vertex.getPosition();
-            if (finitePoint(position)) {
-                boundsMin = glm::min(boundsMin, position);
-                boundsMax = glm::max(boundsMax, position);
-            }
+    glm::vec3 boundsMin(FLT_MAX);
+    glm::vec3 boundsMax(-FLT_MAX);
+    size_t validVertexCount = 0;
+    for (const Vertex& vertex : mesh.vertices_) {
+        const glm::vec3 position = vertex.getPosition();
+        if (!finitePoint(position)) {
+            continue;
         }
+
+        boundsMin = glm::min(boundsMin, position);
+        boundsMax = glm::max(boundsMax, position);
+        ++validVertexCount;
+    }
+
+    if (validVertexCount == 0) {
+        return raster;
     }
 
     const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
-    const glm::vec3 viewRight = glm::normalize(glm::vec3(0.86f, 0.0f, -0.50f));
-    const glm::vec3 viewUp = glm::normalize(glm::vec3(-0.24f, 0.88f, -0.42f));
-    const glm::vec3 viewForward = glm::normalize(glm::cross(viewRight, viewUp));
+    const glm::vec3 viewRight =
+        glm::normalize(glm::vec3(0.86f, 0.0f, -0.50f));
+    const glm::vec3 viewUp =
+        glm::normalize(glm::vec3(-0.24f, 0.88f, -0.42f));
+    const glm::vec3 viewForward =
+        glm::normalize(glm::cross(viewRight, viewUp));
 
     float projectedMinX = FLT_MAX;
     float projectedMaxX = -FLT_MAX;
@@ -92,70 +111,220 @@ void drawMeshThumbnail(ImDrawList* drawList, const Mesh& mesh, const ImVec2& top
             (corner & 2) ? boundsMax.y : boundsMin.y,
             (corner & 4) ? boundsMax.z : boundsMin.z);
         const glm::vec3 local = point - center;
-        const float x = glm::dot(local, viewRight);
-        const float y = glm::dot(local, viewUp);
-        projectedMinX = std::min(projectedMinX, x);
-        projectedMaxX = std::max(projectedMaxX, x);
-        projectedMinY = std::min(projectedMinY, y);
-        projectedMaxY = std::max(projectedMaxY, y);
+        projectedMinX =
+            std::min(projectedMinX, glm::dot(local, viewRight));
+        projectedMaxX =
+            std::max(projectedMaxX, glm::dot(local, viewRight));
+        projectedMinY =
+            std::min(projectedMinY, glm::dot(local, viewUp));
+        projectedMaxY =
+            std::max(projectedMaxY, glm::dot(local, viewUp));
     }
 
-    const float projectedWidth = std::max(projectedMaxX - projectedMinX, 0.001f);
-    const float projectedHeight = std::max(projectedMaxY - projectedMinY, 0.001f);
-    const float padding = 8.0f;
-    const float scale = (thumbnailSize - padding * 2.0f) /
-                        std::max(projectedWidth, projectedHeight);
-    const float centerX = topLeft.x + thumbnailSize * 0.5f;
-    const float centerY = topLeft.y + thumbnailSize * 0.5f;
+    const float projectedWidth =
+        std::max(projectedMaxX - projectedMinX, 0.001f);
+    const float projectedHeight =
+        std::max(projectedMaxY - projectedMinY, 0.001f);
+    constexpr float padding = 5.0f;
+    const float scale =
+        (float(ThumbnailRaster::kResolution) - padding * 2.0f) /
+        std::max(projectedWidth, projectedHeight);
+    const glm::vec2 rasterCenter(
+        float(ThumbnailRaster::kResolution) * 0.5f);
 
     auto project = [&](const glm::vec3& point) {
         const glm::vec3 local = point - center;
-        return ImVec2(centerX + glm::dot(local, viewRight) * scale,
-                      centerY - glm::dot(local, viewUp) * scale);
+        return glm::vec3(
+            rasterCenter.x + glm::dot(local, viewRight) * scale,
+            rasterCenter.y - glm::dot(local, viewUp) * scale,
+            glm::dot(local, viewForward));
     };
 
-    constexpr size_t kMaximumPreviewTriangles = 260;
-    const size_t triangleCount = mesh.indices_.size() / 3;
-    const size_t triangleStep =
-        std::max<size_t>(1, (triangleCount + kMaximumPreviewTriangles - 1) /
-                                kMaximumPreviewTriangles);
-    const glm::vec3 lightDirection = glm::normalize(glm::vec3(0.35f, 0.80f, 0.45f));
+    const glm::vec3 lightDirection =
+        glm::normalize(glm::vec3(0.35f, 0.80f, 0.45f));
+    std::vector<float> depth(
+        ThumbnailRaster::kResolution * ThumbnailRaster::kResolution,
+        -FLT_MAX);
 
-    for (size_t triangle = 0; triangle < triangleCount; triangle += triangleStep) {
-        const size_t indexOffset = triangle * 3;
-        const uint32_t i0 = mesh.indices_[indexOffset + 0];
-        const uint32_t i1 = mesh.indices_[indexOffset + 1];
-        const uint32_t i2 = mesh.indices_[indexOffset + 2];
-        if (i0 >= mesh.vertices_.size() || i1 >= mesh.vertices_.size() ||
-            i2 >= mesh.vertices_.size()) {
-            continue;
+    auto rasterize = [&](bool cullBackFaces) {
+        bool wrotePixel = false;
+        std::fill(depth.begin(), depth.end(), -FLT_MAX);
+        std::fill(raster.shade.begin(), raster.shade.end(), uint8_t(0));
+
+        const size_t triangleCount = mesh.indices_.size() / 3;
+        for (size_t triangle = 0; triangle < triangleCount; ++triangle) {
+            const size_t indexOffset = triangle * 3;
+            const uint32_t i0 = mesh.indices_[indexOffset + 0];
+            const uint32_t i1 = mesh.indices_[indexOffset + 1];
+            const uint32_t i2 = mesh.indices_[indexOffset + 2];
+            if (i0 >= mesh.vertices_.size() ||
+                i1 >= mesh.vertices_.size() ||
+                i2 >= mesh.vertices_.size()) {
+                continue;
+            }
+
+            const glm::vec3 p0 = mesh.vertices_[i0].getPosition();
+            const glm::vec3 p1 = mesh.vertices_[i1].getPosition();
+            const glm::vec3 p2 = mesh.vertices_[i2].getPosition();
+            if (!finitePoint(p0) || !finitePoint(p1) || !finitePoint(p2)) {
+                continue;
+            }
+
+            const glm::vec3 face = glm::cross(p1 - p0, p2 - p0);
+            const float faceLength = glm::length(face);
+            if (faceLength < 1.0e-7f) {
+                continue;
+            }
+
+            const glm::vec3 normal = face / faceLength;
+            const float facing = glm::dot(normal, viewForward);
+            if (cullBackFaces && facing <= 1.0e-5f) {
+                continue;
+            }
+
+            const glm::vec3 v0 = project(p0);
+            const glm::vec3 v1 = project(p1);
+            const glm::vec3 v2 = project(p2);
+            const glm::vec2 s0(v0.x, v0.y);
+            const glm::vec2 s1(v1.x, v1.y);
+            const glm::vec2 s2(v2.x, v2.y);
+            const float area = thumbnailEdge(s0, s1, s2);
+            if (!std::isfinite(area) || std::abs(area) < 1.0e-5f) {
+                continue;
+            }
+
+            const int minX = std::clamp(
+                int(std::floor(std::min({s0.x, s1.x, s2.x}))), 0,
+                ThumbnailRaster::kResolution - 1);
+            const int maxX = std::clamp(
+                int(std::ceil(std::max({s0.x, s1.x, s2.x}))), 0,
+                ThumbnailRaster::kResolution - 1);
+            const int minY = std::clamp(
+                int(std::floor(std::min({s0.y, s1.y, s2.y}))), 0,
+                ThumbnailRaster::kResolution - 1);
+            const int maxY = std::clamp(
+                int(std::ceil(std::max({s0.y, s1.y, s2.y}))), 0,
+                ThumbnailRaster::kResolution - 1);
+            if (minX > maxX || minY > maxY) {
+                continue;
+            }
+
+            const float diffuse = cullBackFaces
+                ? std::max(glm::dot(normal, lightDirection), 0.0f)
+                : std::abs(glm::dot(normal, lightDirection));
+            const uint8_t shade = static_cast<uint8_t>(
+                std::clamp(int(86.0f + diffuse * 169.0f), 1, 255));
+            const float inverseArea = 1.0f / area;
+
+            for (int y = minY; y <= maxY; ++y) {
+                for (int x = minX; x <= maxX; ++x) {
+                    const glm::vec2 sample(float(x) + 0.5f,
+                                           float(y) + 0.5f);
+                    const float w0 =
+                        thumbnailEdge(s1, s2, sample) * inverseArea;
+                    const float w1 =
+                        thumbnailEdge(s2, s0, sample) * inverseArea;
+                    const float w2 = 1.0f - w0 - w1;
+                    if (w0 < -0.0001f || w1 < -0.0001f ||
+                        w2 < -0.0001f) {
+                        continue;
+                    }
+
+                    const float pixelDepth =
+                        w0 * v0.z + w1 * v1.z + w2 * v2.z;
+                    const size_t pixelIndex =
+                        size_t(y) * ThumbnailRaster::kResolution +
+                        size_t(x);
+                    if (pixelDepth <= depth[pixelIndex]) {
+                        continue;
+                    }
+
+                    depth[pixelIndex] = pixelDepth;
+                    raster.shade[pixelIndex] = shade;
+                    wrotePixel = true;
+                }
+            }
         }
 
-        const glm::vec3 p0 = mesh.vertices_[i0].getPosition();
-        const glm::vec3 p1 = mesh.vertices_[i1].getPosition();
-        const glm::vec3 p2 = mesh.vertices_[i2].getPosition();
-        if (!finitePoint(p0) || !finitePoint(p1) || !finitePoint(p2)) {
-            continue;
+        return wrotePixel;
+    };
+
+    // Normal meshes use front faces only. If imported winding is reversed or the
+    // asset is intentionally single-sided, retry without culling so it does not
+    // disappear from the browser.
+    if (!rasterize(true)) {
+        rasterize(false);
+    }
+
+    return raster;
+}
+
+void drawMeshThumbnail(ImDrawList* drawList, const Mesh& mesh,
+                       const ImVec2& topLeft, float thumbnailSize,
+                       bool visible)
+{
+    const ImVec2 bottomRight(topLeft.x + thumbnailSize,
+                             topLeft.y + thumbnailSize);
+    drawList->PushClipRect(topLeft, bottomRight, true);
+
+    if (mesh.vertices_.empty() || mesh.indices_.size() < 3) {
+        const float inset = thumbnailSize * 0.28f;
+        drawList->AddRectFilled(
+            ImVec2(topLeft.x + inset, topLeft.y + inset),
+            ImVec2(bottomRight.x - inset, bottomRight.y - inset),
+            visible ? IM_COL32(126, 145, 160, 255)
+                    : IM_COL32(74, 80, 86, 255),
+            3.0f);
+        drawList->PopClipRect();
+        return;
+    }
+
+    static std::unordered_map<const Mesh*, ThumbnailRaster> thumbnailCache;
+    auto cacheIt = thumbnailCache.find(&mesh);
+    if (cacheIt == thumbnailCache.end() ||
+        cacheIt->second.vertexCount != mesh.vertices_.size() ||
+        cacheIt->second.indexCount != mesh.indices_.size()) {
+        cacheIt =
+            thumbnailCache.insert_or_assign(&mesh, buildMeshThumbnail(mesh)).first;
+    }
+
+    const ThumbnailRaster& raster = cacheIt->second;
+    const float pixelSize =
+        thumbnailSize / float(ThumbnailRaster::kResolution);
+    for (int y = 0; y < ThumbnailRaster::kResolution; ++y) {
+        int x = 0;
+        while (x < ThumbnailRaster::kResolution) {
+            const uint8_t shade =
+                raster.shade[size_t(y) * ThumbnailRaster::kResolution +
+                             size_t(x)];
+            if (shade == 0) {
+                ++x;
+                continue;
+            }
+
+            int runEnd = x + 1;
+            while (runEnd < ThumbnailRaster::kResolution &&
+                   raster.shade[size_t(y) * ThumbnailRaster::kResolution +
+                                size_t(runEnd)] == shade) {
+                ++runEnd;
+            }
+
+            const float brightness = float(shade) / 255.0f;
+            const int base = visible ? 176 : 92;
+            const int red =
+                std::clamp(int(float(base) * brightness), 45, 184);
+            const int green = std::clamp(
+                red + (visible ? 10 : 4), 49, 194);
+            const int blue = std::clamp(
+                red + (visible ? 18 : 7), 53, 204);
+            drawList->AddRectFilled(
+                ImVec2(topLeft.x + float(x) * pixelSize,
+                       topLeft.y + float(y) * pixelSize),
+                ImVec2(topLeft.x + float(runEnd) * pixelSize + 0.35f,
+                       topLeft.y + float(y + 1) * pixelSize + 0.35f),
+                IM_COL32(red, green, blue, 255));
+            x = runEnd;
         }
-
-        const glm::vec3 face = glm::cross(p1 - p0, p2 - p0);
-        const float faceLength = glm::length(face);
-        if (faceLength < 1.0e-7f) {
-            continue;
-        }
-
-        const glm::vec3 normal = face / faceLength;
-        const float lighting =
-            0.38f + 0.62f * std::abs(glm::dot(normal, lightDirection));
-        const int base = visible ? 142 : 82;
-        const int red = std::clamp(int(float(base) * lighting), 48, 178);
-        const int green = std::clamp(red + (visible ? 10 : 4), 52, 188);
-        const int blue = std::clamp(red + (visible ? 18 : 7), 56, 198);
-
-        const ImVec2 points[3] = {project(p0), project(p1), project(p2)};
-        drawList->AddConvexPolyFilled(points, 3, IM_COL32(red, green, blue, 235));
-        drawList->AddPolyline(points, 3, IM_COL32(35, 43, 49, 150),
-                              ImDrawFlags_Closed, 0.55f);
     }
 
     drawList->PopClipRect();
