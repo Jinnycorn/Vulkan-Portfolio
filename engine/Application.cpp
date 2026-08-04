@@ -29,6 +29,14 @@ ImVec4 subduedUiColor(float red, float green, float blue, float alpha)
     ImGui::ColorConvertHSVtoRGB(hue, saturation, value, result.x, result.y, result.z);
     return result;
 }
+struct AssetDragPayload
+{
+    int modelIndex = -1;
+    int meshIndex = -1;
+};
+
+constexpr const char* kAssetDragPayloadType = "HLAB_ASSET_MESH";
+constexpr float kMainMenuBarHeight = 22.0f;
 } // namespace
 
 // Default constructor - uses hardcoded configuration
@@ -796,19 +804,25 @@ void Application::updateGui()
         pendingViewportPick_ = false;
     }
 
+    renderMainMenuBar();
+
     if (!showUi_) {
         ImGui::Render();
         return;
     }
 
+    renderViewportDropTarget();
+
     const float panelWidth = std::clamp(float(windowSize_.width) * 0.30f, 340.0f, 410.0f);
-    ImGui::SetNextWindowPos(ImVec2(float(windowSize_.width) - panelWidth, 0.0f),
-                            ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2(panelWidth, float(windowSize_.height)), ImGuiCond_Always);
+    ImGui::SetNextWindowPos(
+        ImVec2(float(windowSize_.width) - panelWidth, kMainMenuBarHeight), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(
+        ImVec2(panelWidth, float(windowSize_.height) - kMainMenuBarHeight), ImGuiCond_Always);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     constexpr ImGuiWindowFlags inspectorFlags =
         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoTitleBar;
+    if (showInspector_) {
     ImGui::Begin("##PortfolioInspector", nullptr, inspectorFlags);
 
     ImGui::TextColored(subduedUiColor(0.37f, 0.68f, 1.0f, 1.0f), "VULKAN PORTFOLIO");
@@ -1135,10 +1149,15 @@ void Application::updateGui()
     }
 
     ImGui::End();
+    }
     ImGui::PopStyleVar();
 
-    renderAssetEditorPanel();
-    renderSelectedAssetGizmo();
+    if (showAssetBrowser_) {
+        renderAssetEditorPanel();
+    }
+    if (showSelectionGizmo_) {
+        renderSelectedAssetGizmo();
+    }
 
     {
         TRACY_CPU_SCOPE("ImGui Render");
@@ -1146,11 +1165,97 @@ void Application::updateGui()
     }
 }
 
+void Application::renderMainMenuBar()
+{
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(7.0f, 3.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+
+    if (ImGui::BeginMainMenuBar()) {
+        if (ImGui::BeginMenu("View")) {
+            ImGui::MenuItem("Inspector", nullptr, &showInspector_);
+            ImGui::MenuItem("Asset Browser", nullptr, &showAssetBrowser_);
+            ImGui::MenuItem("Selection Gizmo", nullptr, &showSelectionGizmo_);
+            ImGui::Separator();
+            if (ImGui::MenuItem(showUi_ ? "Hide workspace UI" : "Show workspace UI", "F1")) {
+                showUi_ = !showUi_;
+            }
+            ImGui::EndMenu();
+        }
+
+        if (showUi_ && ImGui::BeginMenu("Rendering")) {
+            bool shadows = renderer_->optionsUBO().shadowOn != 0;
+            if (ImGui::MenuItem("Shadows", nullptr, &shadows)) {
+                renderer_->optionsUBO().shadowOn = shadows ? 1 : 0;
+            }
+
+            bool frustum = renderer_->isFrustumCullingEnabled();
+            if (ImGui::MenuItem("Frustum Culling", "F4", &frustum)) {
+                renderer_->setFrustumCullingEnabled(frustum);
+            }
+
+            bool occlusion = renderer_->isOcclusionCullingEnabled();
+            if (ImGui::MenuItem("GPU Occlusion Culling", "F5", &occlusion)) {
+                renderer_->setOcclusionCullingEnabled(occlusion);
+            }
+            ImGui::EndMenu();
+        }
+
+        ImGui::SameLine(ImGui::GetWindowWidth() - 245.0f);
+        ImGui::TextDisabled("F1 UI  |  F2 Camera  |  FPS %.0f", currentFPS_);
+        ImGui::EndMainMenuBar();
+    }
+
+    ImGui::PopStyleVar(2);
+}
+
+void Application::renderViewportDropTarget()
+{
+    const float inspectorWidth =
+        showInspector_ ? std::clamp(float(windowSize_.width) * 0.30f, 340.0f, 410.0f) : 0.0f;
+    const float assetHeight = showAssetBrowser_ ? 310.0f : 0.0f;
+    const ImVec2 viewportPos(0.0f, kMainMenuBarHeight);
+    const ImVec2 viewportSize(
+        std::max(1.0f, float(windowSize_.width) - inspectorWidth),
+        std::max(1.0f, float(windowSize_.height) - kMainMenuBarHeight - assetHeight));
+
+    const bool draggingAsset = ImGui::GetDragDropPayload() != nullptr;
+    ImGuiWindowFlags flags =
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBackground |
+        ImGuiWindowFlags_NoBringToFrontOnFocus;
+    if (!draggingAsset) {
+        flags |= ImGuiWindowFlags_NoInputs;
+    }
+
+    ImGui::SetNextWindowPos(viewportPos, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(viewportSize, ImGuiCond_Always);
+    ImGui::Begin("##ViewportAssetDropTarget", nullptr, flags);
+    if (ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* payload =
+                ImGui::AcceptDragDropPayload(kAssetDragPayloadType)) {
+            if (payload->DataSize == sizeof(AssetDragPayload)) {
+                const auto dropped = *static_cast<const AssetDragPayload*>(payload->Data);
+                placeAssetAtViewport(dropped.modelIndex, dropped.meshIndex,
+                                     ImGui::GetIO().MousePos.x, ImGui::GetIO().MousePos.y);
+            }
+        }
+        ImGui::EndDragDropTarget();
+    }
+
+    if (draggingAsset) {
+        ImGui::GetForegroundDrawList()->AddRect(
+            viewportPos, ImVec2(viewportPos.x + viewportSize.x, viewportPos.y + viewportSize.y),
+            IM_COL32(70, 135, 205, 190), 0.0f, 0, 2.0f);
+    }
+    ImGui::End();
+}
+
 void Application::renderAssetEditorPanel()
 {
     constexpr float assetPanelHeight = 310.0f;
-    const float inspectorWidth =
-        std::clamp(float(windowSize_.width) * 0.30f, 340.0f, 410.0f);
+    const float inspectorWidth = showInspector_
+                                     ? std::clamp(float(windowSize_.width) * 0.30f, 340.0f, 410.0f)
+                                     : 0.0f;
     const float panelWidth = std::max(1.0f, float(windowSize_.width) - inspectorWidth);
 
     ImGui::SetNextWindowPos(
@@ -1162,10 +1267,10 @@ void Application::renderAssetEditorPanel()
         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoTitleBar;
     ImGui::Begin("##BottomAssetManager", nullptr, assetWindowFlags);
 
-    ImGui::TextColored(subduedUiColor(0.37f, 0.68f, 1.0f, 1.0f), "ASSET MANAGER");
+    ImGui::TextColored(subduedUiColor(0.37f, 0.68f, 1.0f, 1.0f), "ASSET BROWSER");
     ImGui::SameLine();
     ImGui::TextDisabled(
-        "Click select  |  Left drag orbit  |  Right dolly  |  Middle pan  |  Gizmo edit");
+        "Drag a thumbnail into the viewport to place it  |  Click to edit");
     ImGui::Separator();
 
     if (models_.empty()) {
@@ -1203,34 +1308,91 @@ void Application::renderAssetEditorPanel()
 
     const float listHeight = std::max(80.0f, ImGui::GetContentRegionAvail().y - 64.0f);
     if (ImGui::BeginChild("##AssetList", ImVec2(0.0f, listHeight), true)) {
-        ImGuiListClipper clipper;
-        clipper.Begin(static_cast<int>(meshes.size()));
-        while (clipper.Step()) {
-            for (int meshIndex = clipper.DisplayStart; meshIndex < clipper.DisplayEnd;
-                 ++meshIndex) {
-                auto& mesh = meshes[meshIndex];
-                const string displayName =
-                    mesh.name_.empty() ? std::format("Mesh {}", meshIndex) : mesh.name_;
-                if (!assetFilter.PassFilter(displayName.c_str())) {
-                    continue;
-                }
+        constexpr float thumbnailSize = 64.0f;
+        constexpr float cardWidth = 92.0f;
+        const int columns =
+            std::max(1, int(ImGui::GetContentRegionAvail().x / cardWidth));
+        int visibleAssetIndex = 0;
 
-                const string label =
-                    std::format("{}{}##asset_{}", mesh.editorVisible ? "" : "[HIDDEN] ",
-                                displayName, meshIndex);
-                if (!mesh.editorVisible) {
-                    ImGui::PushStyleColor(ImGuiCol_Text,
-                                          ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-                }
-                if (ImGui::Selectable(label.c_str(), selectedMeshIndex_ == meshIndex)) {
-                    selectedMeshIndex_ = meshIndex;
-                    // List selection has no surface hit, so use the mesh bounds center.
-                    selectedGizmoPivotValid_ = false;
-                }
-                if (!mesh.editorVisible) {
-                    ImGui::PopStyleColor();
-                }
+        for (int meshIndex = 0; meshIndex < int(meshes.size()); ++meshIndex) {
+            auto& mesh = meshes[meshIndex];
+            const string displayName =
+                mesh.name_.empty() ? std::format("Mesh {}", meshIndex) : mesh.name_;
+            if (!assetFilter.PassFilter(displayName.c_str())) {
+                continue;
             }
+
+            if (visibleAssetIndex > 0 && visibleAssetIndex % columns != 0) {
+                ImGui::SameLine();
+            }
+            ++visibleAssetIndex;
+
+            ImGui::PushID(meshIndex);
+            ImGui::BeginGroup();
+
+            const ImVec2 imageTopLeft = ImGui::GetCursorScreenPos();
+            ImGui::InvisibleButton("##Thumbnail", ImVec2(thumbnailSize, thumbnailSize));
+            const bool selected = selectedMeshIndex_ == meshIndex;
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            const ImU32 background = selected ? IM_COL32(42, 83, 120, 255)
+                                              : IM_COL32(30, 34, 40, 255);
+            drawList->AddRectFilled(
+                imageTopLeft,
+                ImVec2(imageTopLeft.x + thumbnailSize, imageTopLeft.y + thumbnailSize),
+                background, 4.0f);
+
+            // Lightweight geometry thumbnail generated from the mesh bounds. It avoids
+            // allocating hundreds of extra Vulkan preview textures on low-VRAM GPUs.
+            const glm::vec3 extent = glm::max(mesh.maxBounds - mesh.minBounds,
+                                               glm::vec3(0.001f));
+            const float maxExtent = std::max(extent.x, std::max(extent.y, extent.z));
+            const float halfWidth = 20.0f * std::max(0.25f, extent.x / maxExtent);
+            const float halfHeight = 20.0f * std::max(0.25f, extent.y / maxExtent);
+            const ImVec2 center(imageTopLeft.x + thumbnailSize * 0.5f,
+                                imageTopLeft.y + thumbnailSize * 0.5f);
+            const ImU32 assetColor = mesh.editorVisible ? IM_COL32(139, 174, 202, 255)
+                                                        : IM_COL32(92, 98, 106, 255);
+            drawList->AddRectFilled(
+                ImVec2(center.x - halfWidth, center.y - halfHeight),
+                ImVec2(center.x + halfWidth, center.y + halfHeight),
+                assetColor, 3.0f);
+            drawList->AddLine(
+                ImVec2(center.x - halfWidth, center.y + halfHeight),
+                ImVec2(center.x, center.y + halfHeight + 7.0f),
+                IM_COL32(82, 108, 128, 255), 2.0f);
+            drawList->AddLine(
+                ImVec2(center.x + halfWidth, center.y + halfHeight),
+                ImVec2(center.x, center.y + halfHeight + 7.0f),
+                IM_COL32(82, 108, 128, 255), 2.0f);
+            drawList->AddRect(
+                imageTopLeft,
+                ImVec2(imageTopLeft.x + thumbnailSize, imageTopLeft.y + thumbnailSize),
+                selected ? IM_COL32(94, 174, 235, 255) : IM_COL32(62, 68, 76, 255),
+                4.0f, 0, selected ? 2.0f : 1.0f);
+
+            if (ImGui::IsItemClicked()) {
+                selectedMeshIndex_ = meshIndex;
+                selectedGizmoPivotValid_ = false;
+            }
+            if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+                const AssetDragPayload payload{selectedModelIndex_, meshIndex};
+                ImGui::SetDragDropPayload(kAssetDragPayloadType, &payload, sizeof(payload));
+                ImGui::Text("Place %s", displayName.c_str());
+                ImGui::EndDragDropSource();
+            }
+
+            const string shortName =
+                displayName.size() > 13 ? displayName.substr(0, 12) + "..." : displayName;
+            ImGui::TextUnformatted(shortName.c_str());
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", displayName.c_str());
+            }
+            ImGui::EndGroup();
+            ImGui::PopID();
+        }
+
+        if (visibleAssetIndex == 0) {
+            ImGui::TextDisabled("No matching assets.");
         }
     }
     ImGui::EndChild();
@@ -1372,6 +1534,69 @@ void Application::renderAssetEditorPanel()
     ImGui::EndChild();
     ImGui::End();
     ImGui::PopStyleVar();
+}
+
+void Application::placeAssetAtViewport(int modelIndex, int meshIndex,
+                                               float mouseX, float mouseY)
+{
+    if (modelIndex < 0 || modelIndex >= int(models_.size()) ||
+        meshIndex < 0 || meshIndex >= int(models_[modelIndex]->meshes().size()) ||
+        windowSize_.width == 0 || windowSize_.height == 0) {
+        return;
+    }
+
+    const float ndcX = 2.0f * mouseX / float(windowSize_.width) - 1.0f;
+    const float ndcY = 2.0f * mouseY / float(windowSize_.height) - 1.0f;
+    const glm::mat4 inverseViewProjection =
+        glm::inverse(camera_.matrices.perspective * camera_.matrices.view);
+    glm::vec4 nearPoint =
+        inverseViewProjection * glm::vec4(ndcX, ndcY, 0.0f, 1.0f);
+    glm::vec4 farPoint =
+        inverseViewProjection * glm::vec4(ndcX, ndcY, 1.0f, 1.0f);
+    nearPoint /= nearPoint.w;
+    farPoint /= farPoint.w;
+
+    const glm::vec3 rayOrigin(nearPoint);
+    const glm::vec3 rayDirection =
+        glm::normalize(glm::vec3(farPoint - nearPoint));
+
+    // Place on the scene's Y=0 ground plane. For a nearly parallel view, use a
+    // camera-relative fallback so the asset is never lost at an extreme distance.
+    float distance = 10.0f;
+    if (std::abs(rayDirection.y) > 1.0e-5f) {
+        const float groundDistance = -rayOrigin.y / rayDirection.y;
+        if (groundDistance > 0.0f && groundDistance < 10000.0f) {
+            distance = groundDistance;
+        }
+    }
+    const glm::vec3 worldDropPoint = rayOrigin + rayDirection * distance;
+
+    auto& model = *models_[modelIndex];
+    auto& mesh = model.meshes()[meshIndex];
+    const glm::vec3 modelDropPoint =
+        glm::vec3(glm::inverse(model.modelMatrix()) * glm::vec4(worldDropPoint, 1.0f));
+    const glm::vec3 translation = modelDropPoint - mesh.editorPivot();
+
+    float componentsTranslation[3]{};
+    float componentsRotation[3]{};
+    float componentsScale[3]{1.0f, 1.0f, 1.0f};
+    ImGuizmo::DecomposeMatrixToComponents(
+        glm::value_ptr(mesh.editorTransform), componentsTranslation,
+        componentsRotation, componentsScale);
+    componentsTranslation[0] = translation.x;
+    componentsTranslation[1] = translation.y;
+    componentsTranslation[2] = translation.z;
+    ImGuizmo::RecomposeMatrixFromComponents(
+        componentsTranslation, componentsRotation, componentsScale,
+        glm::value_ptr(mesh.editorTransform));
+
+    mesh.editorVisible = true;
+    mesh.editorTransformDirty = true;
+    selectedModelIndex_ = modelIndex;
+    selectedMeshIndex_ = meshIndex;
+    selectedGizmoPivotValid_ = false;
+    printLog("Placed asset '{}' from Asset Browser",
+             mesh.name_.empty() ? std::format("Mesh {}", meshIndex) : mesh.name_);
 }
 
 void Application::pickAssetAtViewport(float mouseX, float mouseY)
