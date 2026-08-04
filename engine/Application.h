@@ -225,6 +225,9 @@ class Application
     MouseState mouseState_;
     Camera camera_;
     bool showUi_{true};
+    bool showInspector_{true};
+    bool showAssetBrowser_{true};
+    bool showSelectionGizmo_{true};
 
     vector<CommandBuffer> commandBuffers_{};
 
@@ -284,9 +287,12 @@ class Application
     // FPS calculation method
     void updatePerformanceMetrics(float deltaTime);
 
+    void renderMainMenuBar();
     void renderAssetEditorPanel();
+    void renderViewportDropTarget();
     void renderSelectedAssetGizmo();
     void pickAssetAtViewport(float mouseX, float mouseY);
+    void placeAssetAtViewport(int modelIndex, int meshIndex, float mouseX, float mouseY);
     void renderQualityControlPanel();
     void renderHDRControlWindow();
     void renderPostProcessingControlWindow();
