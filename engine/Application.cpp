@@ -190,6 +190,14 @@ Application::Application(const ApplicationConfig& config)
     setupCamera(config.camera);
     loadModels(config.models);
 
+    if (audioEngine_.initialize()) {
+        audioEngine_.setVolume(bgmVolume_);
+        audioEngine_.play();
+        printLog("Audio engine initialized: procedural ambient BGM");
+    } else {
+        printLog("Audio engine unavailable; continuing without BGM");
+    }
+
     renderer_ = std::make_unique<Renderer>(
         ctx_, shaderManager_, kMaxFramesInFlight, kAssetsPathPrefix, kShaderPathPrefix, models_,
         swapchain_.colorFormat(), ctx_.depthFormat(), windowSize_.width, windowSize_.height);
@@ -563,6 +571,8 @@ void Application::recreateSwapchain()
 
 Application::~Application()
 {
+    // Stop the independent audio voice before Vulkan and window teardown.
+    audioEngine_.shutdown();
     ctx_.waitIdle();
 
     for (auto& cmd : commandBuffers_) {
@@ -1333,6 +1343,40 @@ void Application::renderMainMenuBar()
             ImGui::EndMenu();
         }
 
+
+        if (ImGui::BeginMenu("Audio")) {
+            const bool audioAvailable = audioEngine_.isAvailable();
+            if (!audioAvailable) {
+                ImGui::BeginDisabled();
+            }
+
+            bool playing = audioEngine_.isPlaying();
+            if (ImGui::MenuItem(playing ? "Pause BGM" : "Play BGM", nullptr, &playing)) {
+                if (playing) {
+                    audioEngine_.play();
+                } else {
+                    audioEngine_.pause();
+                }
+            }
+
+            bool muted = audioEngine_.isMuted();
+            if (ImGui::MenuItem("Mute", nullptr, &muted)) {
+                audioEngine_.setMuted(muted);
+            }
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Ambient BGM");
+            ImGui::SetNextItemWidth(170.0f);
+            if (ImGui::SliderFloat("Volume", &bgmVolume_, 0.0f, 1.0f, "%.0f%%")) {
+                audioEngine_.setVolume(bgmVolume_);
+            }
+
+            if (!audioAvailable) {
+                ImGui::EndDisabled();
+                ImGui::TextDisabled("Audio device unavailable");
+            }
+            ImGui::EndMenu();
+        }
         ImGui::SameLine(ImGui::GetWindowWidth() - 245.0f);
         ImGui::TextDisabled("F1 UI  |  F2 Camera  |  FPS %.0f", currentFPS_);
         ImGui::EndMainMenuBar();
