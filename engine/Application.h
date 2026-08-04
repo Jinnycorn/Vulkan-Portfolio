@@ -225,6 +225,21 @@ class Application
 
     MouseState mouseState_;
     Camera camera_;
+
+    // Third-person portfolio controller. A motorcycle/scooter mesh is preferred;
+    // a sign-like prop is used when no vehicle is present.
+    bool thirdPersonEnabled_{true};
+    int thirdPersonModelIndex_{-1};
+    int thirdPersonMeshIndex_{-1};
+    glm::vec3 thirdPersonLocalTranslation_{0.0f};
+    glm::vec3 thirdPersonBaseScale_{1.0f};
+    glm::quat thirdPersonBaseRotation_{1.0f, 0.0f, 0.0f, 0.0f};
+    float thirdPersonHeading_{0.0f};
+    float thirdPersonOrbitYaw_{180.0f};
+    float thirdPersonOrbitPitch_{18.0f};
+    float thirdPersonDistance_{7.0f};
+    float thirdPersonMoveSpeed_{4.0f};
+
     bool showUi_{true};
     bool showInspector_{true};
     bool showAssetBrowser_{true};
@@ -285,6 +300,10 @@ class Application
     void setupCamera(const CameraConfig& cameraConfig);
     void loadModels(const vector<ModelConfig>& modelConfigs);
     void setupCallbacks();
+    void initializeThirdPersonController();
+    void setThirdPersonPlayer(int modelIndex, int meshIndex);
+    void updateThirdPersonController(float deltaTime);
+    void updateThirdPersonCamera();
     void initializeVulkanResources();
     void recreateSwapchain();
 
