@@ -37,8 +37,9 @@ struct AssetDragPayload
 };
 
 constexpr const char* kAssetDragPayloadType = "HLAB_ASSET_MESH";
-constexpr float kMainMenuBarHeight = 22.0f;
+constexpr float kMainMenuBarHeight = 32.0f;
 constexpr float kAssetBrowserWidth = 264.0f;
+constexpr float kTransformPanelHeight = 158.0f;
 
 bool finitePoint(const glm::vec3& point)
 {
@@ -460,9 +461,16 @@ void Application::setupCallbacks()
                     const float inspectorWidth = app->showInspector_
                         ? std::clamp(float(app->windowSize_.width) * 0.30f, 340.0f, 410.0f)
                         : 0.0f;
+                    const float transformPanelHeight =
+                        app->showAssetBrowser_ && app->showSelectionGizmo_ &&
+                                app->selectedMeshIndex_ >= 0
+                            ? kTransformPanelHeight
+                            : 0.0f;
                     if (float(xpos) >= browserWidth &&
                         float(xpos) < float(app->windowSize_.width) - inspectorWidth &&
-                        float(ypos) >= kMainMenuBarHeight) {
+                        float(ypos) >= kMainMenuBarHeight &&
+                        float(ypos) < float(app->windowSize_.height) -
+                                          transformPanelHeight) {
                         app->viewportLeftPressed_ = true;
                         app->viewportLeftPressPosition_ =
                             glm::vec2(float(xpos), float(ypos));
@@ -1292,7 +1300,7 @@ void Application::updateGui()
 
 void Application::renderMainMenuBar()
 {
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(7.0f, 3.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(12.0f, 9.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
 
     if (ImGui::BeginMainMenuBar()) {
@@ -1339,9 +1347,14 @@ void Application::renderViewportDropTarget()
     const float inspectorWidth =
         showInspector_ ? std::clamp(float(windowSize_.width) * 0.30f, 340.0f, 410.0f) : 0.0f;
     const ImVec2 viewportPos(browserWidth, kMainMenuBarHeight);
+    const float transformPanelHeight =
+        showAssetBrowser_ && showSelectionGizmo_ && selectedMeshIndex_ >= 0
+            ? kTransformPanelHeight
+            : 0.0f;
     const ImVec2 viewportSize(
         std::max(1.0f, float(windowSize_.width) - browserWidth - inspectorWidth),
-        std::max(1.0f, float(windowSize_.height) - kMainMenuBarHeight));
+        std::max(1.0f, float(windowSize_.height) - kMainMenuBarHeight -
+                           transformPanelHeight));
 
     const bool draggingAsset = ImGui::GetDragDropPayload() != nullptr;
     ImGuiWindowFlags flags =
@@ -1433,10 +1446,9 @@ void Application::renderAssetEditorPanel()
 
     const bool hasSelection =
         selectedMeshIndex_ >= 0 && selectedMeshIndex_ < int(meshes.size());
-    const float transformPanelHeight = hasSelection ? 264.0f : 0.0f;
     const float footerHeight = 34.0f;
-    const float listHeight = std::max(
-        100.0f, ImGui::GetContentRegionAvail().y - footerHeight - transformPanelHeight);
+    const float listHeight =
+        std::max(100.0f, ImGui::GetContentRegionAvail().y - footerHeight);
 
     if (ImGui::BeginChild("##AssetList", ImVec2(0.0f, listHeight), false)) {
         constexpr float cardWidth = 112.0f;
@@ -1564,91 +1576,119 @@ void Application::renderAssetEditorPanel()
         }
     }
 
-    if (hasSelection) {
-        auto& selectedMesh = meshes[selectedMeshIndex_];
-        ImGui::Separator();
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(20, 24, 29, 255));
-        if (ImGui::BeginChild("##TransformPanel", ImVec2(0.0f, 0.0f), true)) {
-            const string selectedName = selectedMesh.name_.empty()
-                                            ? std::format("Mesh {}", selectedMeshIndex_)
-                                            : selectedMesh.name_;
-            ImGui::TextUnformatted("TRANSFORM");
-            ImGui::SameLine();
-            ImGui::TextDisabled("%s", selectedName.c_str());
+    ImGui::End();
+    ImGui::PopStyleVar(2);
 
-            const float operationWidth =
-                std::max(58.0f, (ImGui::GetContentRegionAvail().x - 8.0f) / 3.0f);
-            if (ImGui::Selectable("Move", gizmoOperation_ == 0, 0,
-                                  ImVec2(operationWidth, 25.0f))) {
-                gizmoOperation_ = 0;
-            }
-            ImGui::SameLine();
-            if (ImGui::Selectable("Rotate", gizmoOperation_ == 1, 0,
-                                  ImVec2(operationWidth, 25.0f))) {
-                gizmoOperation_ = 1;
-            }
-            ImGui::SameLine();
-            if (ImGui::Selectable("Scale", gizmoOperation_ == 2, 0,
-                                  ImVec2(operationWidth, 25.0f))) {
-                gizmoOperation_ = 2;
-            }
+    if (!hasSelection || !showSelectionGizmo_) {
+        return;
+    }
 
-            ImGui::Checkbox("Local", &gizmoLocalSpace_);
-            ImGui::SameLine();
-            ImGui::Checkbox("Snap", &gizmoSnapEnabled_);
-            if (gizmoSnapEnabled_) {
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth(-1.0f);
-                if (gizmoOperation_ == 0) {
-                    ImGui::DragFloat("##MoveSnap", &gizmoTranslationSnap_, 0.01f,
-                                     0.01f, 10.0f, "%.2f");
-                } else if (gizmoOperation_ == 1) {
-                    ImGui::DragFloat("##RotateSnap", &gizmoRotationSnap_, 1.0f,
-                                     1.0f, 90.0f, "%.0f deg");
-                } else {
-                    ImGui::DragFloat("##ScaleSnap", &gizmoScaleSnap_, 0.01f,
-                                     0.01f, 1.0f, "%.2f");
-                }
-            }
+    auto& selectedMesh = meshes[selectedMeshIndex_];
+    const float inspectorWidth =
+        showInspector_ ? std::clamp(float(windowSize_.width) * 0.30f, 340.0f, 410.0f) : 0.0f;
+    const float panelWidth =
+        std::max(1.0f, float(windowSize_.width) - kAssetBrowserWidth - inspectorWidth);
+    const float panelTop =
+        std::max(kMainMenuBarHeight, float(windowSize_.height) - kTransformPanelHeight);
 
-            float translation[3]{};
-            float rotation[3]{};
-            float scale[3]{1.0f, 1.0f, 1.0f};
-            ImGuizmo::DecomposeMatrixToComponents(
-                glm::value_ptr(selectedMesh.editorTransform), translation, rotation, scale);
+    ImGui::SetNextWindowPos(ImVec2(kAssetBrowserWidth, panelTop), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(panelWidth, kTransformPanelHeight), ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.98f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14.0f, 10.0f));
+    constexpr ImGuiWindowFlags transformWindowFlags =
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoTitleBar;
+    ImGui::Begin("##BottomTransformPanel", nullptr, transformWindowFlags);
 
-            ImGui::SetNextItemWidth(-1.0f);
-            bool transformChanged = ImGui::DragFloat3("Position", translation, 0.05f);
-            ImGui::SetNextItemWidth(-1.0f);
-            transformChanged |= ImGui::DragFloat3("Rotation", rotation, 0.5f);
-            ImGui::SetNextItemWidth(-1.0f);
-            transformChanged |=
-                ImGui::DragFloat3("Scale", scale, 0.01f, 0.001f, 100.0f);
-            if (transformChanged) {
-                ImGuizmo::RecomposeMatrixFromComponents(
-                    translation, rotation, scale,
-                    glm::value_ptr(selectedMesh.editorTransform));
-                selectedMesh.editorTransformDirty = true;
-            }
+    const string selectedName = selectedMesh.name_.empty()
+                                    ? std::format("Mesh {}", selectedMeshIndex_)
+                                    : selectedMesh.name_;
+    ImGui::TextUnformatted("TRANSFORM");
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s", selectedName.c_str());
 
-            const float actionWidth =
-                std::max(64.0f, (ImGui::GetContentRegionAvail().x - 6.0f) * 0.5f);
-            const char* visibilityLabel =
-                selectedMesh.editorVisible ? "Hide Asset" : "Restore Asset";
-            if (ImGui::Button(visibilityLabel, ImVec2(actionWidth, 0.0f))) {
-                selectedMesh.editorVisible = !selectedMesh.editorVisible;
-                selectedMesh.editorTransformDirty = true;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Reset", ImVec2(actionWidth, 0.0f))) {
-                selectedMesh.editorTransform = glm::mat4(1.0f);
-                selectedMesh.editorVisible = true;
-                selectedMesh.editorTransformDirty = true;
-                selectedGizmoPivotValid_ = false;
-            }
+    constexpr float operationWidth = 86.0f;
+    if (ImGui::Selectable("Move", gizmoOperation_ == 0, 0,
+                          ImVec2(operationWidth, 25.0f))) {
+        gizmoOperation_ = 0;
+    }
+    ImGui::SameLine();
+    if (ImGui::Selectable("Rotate", gizmoOperation_ == 1, 0,
+                          ImVec2(operationWidth, 25.0f))) {
+        gizmoOperation_ = 1;
+    }
+    ImGui::SameLine();
+    if (ImGui::Selectable("Scale", gizmoOperation_ == 2, 0,
+                          ImVec2(operationWidth, 25.0f))) {
+        gizmoOperation_ = 2;
+    }
+    ImGui::SameLine(0.0f, 18.0f);
+    ImGui::Checkbox("Local", &gizmoLocalSpace_);
+    ImGui::SameLine();
+    ImGui::Checkbox("Snap", &gizmoSnapEnabled_);
+    if (gizmoSnapEnabled_) {
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(96.0f);
+        if (gizmoOperation_ == 0) {
+            ImGui::DragFloat("##MoveSnap", &gizmoTranslationSnap_, 0.01f,
+                             0.01f, 10.0f, "%.2f");
+        } else if (gizmoOperation_ == 1) {
+            ImGui::DragFloat("##RotateSnap", &gizmoRotationSnap_, 1.0f,
+                             1.0f, 90.0f, "%.0f deg");
+        } else {
+            ImGui::DragFloat("##ScaleSnap", &gizmoScaleSnap_, 0.01f,
+                             0.01f, 1.0f, "%.2f");
         }
-        ImGui::EndChild();
-        ImGui::PopStyleColor();
+    }
+
+    float translation[3]{};
+    float rotation[3]{};
+    float scale[3]{1.0f, 1.0f, 1.0f};
+    ImGuizmo::DecomposeMatrixToComponents(
+        glm::value_ptr(selectedMesh.editorTransform), translation, rotation, scale);
+
+    const float valuesWidth =
+        std::max(120.0f, (ImGui::GetContentRegionAvail().x - 20.0f) / 3.0f);
+    bool transformChanged = false;
+
+    ImGui::BeginGroup();
+    ImGui::TextDisabled("POSITION");
+    ImGui::SetNextItemWidth(valuesWidth);
+    transformChanged |= ImGui::DragFloat3("##Position", translation, 0.05f);
+    ImGui::EndGroup();
+    ImGui::SameLine(0.0f, 10.0f);
+    ImGui::BeginGroup();
+    ImGui::TextDisabled("ROTATION");
+    ImGui::SetNextItemWidth(valuesWidth);
+    transformChanged |= ImGui::DragFloat3("##Rotation", rotation, 0.5f);
+    ImGui::EndGroup();
+    ImGui::SameLine(0.0f, 10.0f);
+    ImGui::BeginGroup();
+    ImGui::TextDisabled("SCALE");
+    ImGui::SetNextItemWidth(valuesWidth);
+    transformChanged |=
+        ImGui::DragFloat3("##Scale", scale, 0.01f, 0.001f, 100.0f);
+    ImGui::EndGroup();
+
+    if (transformChanged) {
+        ImGuizmo::RecomposeMatrixFromComponents(
+            translation, rotation, scale, glm::value_ptr(selectedMesh.editorTransform));
+        selectedMesh.editorTransformDirty = true;
+    }
+
+    const char* visibilityLabel =
+        selectedMesh.editorVisible ? "Hide Asset" : "Restore Asset";
+    if (ImGui::Button(visibilityLabel, ImVec2(110.0f, 0.0f))) {
+        selectedMesh.editorVisible = !selectedMesh.editorVisible;
+        selectedMesh.editorTransformDirty = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Reset", ImVec2(90.0f, 0.0f))) {
+        selectedMesh.editorTransform = glm::mat4(1.0f);
+        selectedMesh.editorVisible = true;
+        selectedMesh.editorTransformDirty = true;
+        selectedGizmoPivotValid_ = false;
     }
 
     ImGui::End();
