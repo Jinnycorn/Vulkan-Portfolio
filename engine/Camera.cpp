@@ -19,6 +19,15 @@ void Camera::updateViewMatrix()
 {
     glm::mat4 currentMatrix = matrices.view;
 
+    if (type == CameraType::thirdperson) {
+        matrices.view = glm::lookAtRH(position, target, glm::vec3(0.0f, 1.0f, 0.0f));
+        viewPos = position;
+        if (matrices.view != currentMatrix) {
+            updated = true;
+        }
+        return;
+    }
+
     glm::mat4 rotM = glm::mat4(1.0f);
     glm::mat4 transM;
 
@@ -99,6 +108,14 @@ void Camera::setRotation(glm::vec3 rotation)
 void Camera::setViewPos(glm::vec3 viewPos)
 {
     this->viewPos = viewPos;
+    updateViewMatrix();
+}
+
+void Camera::setLookAt(glm::vec3 eye, glm::vec3 target)
+{
+    type = CameraType::thirdperson;
+    position = eye;
+    this->target = target;
     updateViewMatrix();
 }
 
