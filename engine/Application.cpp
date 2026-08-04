@@ -12,6 +12,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <chrono>
 #include <algorithm>
+#include <cmath>
 
 namespace hlab {
 
@@ -38,6 +39,126 @@ struct AssetDragPayload
 constexpr const char* kAssetDragPayloadType = "HLAB_ASSET_MESH";
 constexpr float kMainMenuBarHeight = 22.0f;
 constexpr float kAssetBrowserWidth = 264.0f;
+
+bool finitePoint(const glm::vec3& point)
+{
+    return std::isfinite(point.x) && std::isfinite(point.y) && std::isfinite(point.z);
+}
+
+void drawMeshThumbnail(ImDrawList* drawList, const Mesh& mesh, const ImVec2& topLeft,
+                       float thumbnailSize, bool visible)
+{
+    const ImVec2 bottomRight(topLeft.x + thumbnailSize, topLeft.y + thumbnailSize);
+    drawList->PushClipRect(topLeft, bottomRight, true);
+
+    if (mesh.vertices_.empty() || mesh.indices_.size() < 3) {
+        const float inset = thumbnailSize * 0.28f;
+        drawList->AddRectFilled(
+            ImVec2(topLeft.x + inset, topLeft.y + inset),
+            ImVec2(bottomRight.x - inset, bottomRight.y - inset),
+            visible ? IM_COL32(126, 145, 160, 255) : IM_COL32(74, 80, 86, 255), 3.0f);
+        drawList->PopClipRect();
+        return;
+    }
+
+    glm::vec3 boundsMin = mesh.minBounds;
+    glm::vec3 boundsMax = mesh.maxBounds;
+    if (!finitePoint(boundsMin) || !finitePoint(boundsMax) ||
+        glm::any(glm::lessThanEqual(boundsMax, boundsMin))) {
+        boundsMin = glm::vec3(FLT_MAX);
+        boundsMax = glm::vec3(-FLT_MAX);
+        for (const Vertex& vertex : mesh.vertices_) {
+            const glm::vec3 position = vertex.getPosition();
+            if (finitePoint(position)) {
+                boundsMin = glm::min(boundsMin, position);
+                boundsMax = glm::max(boundsMax, position);
+            }
+        }
+    }
+
+    const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
+    const glm::vec3 viewRight = glm::normalize(glm::vec3(0.86f, 0.0f, -0.50f));
+    const glm::vec3 viewUp = glm::normalize(glm::vec3(-0.24f, 0.88f, -0.42f));
+    const glm::vec3 viewForward = glm::normalize(glm::cross(viewRight, viewUp));
+
+    float projectedMinX = FLT_MAX;
+    float projectedMaxX = -FLT_MAX;
+    float projectedMinY = FLT_MAX;
+    float projectedMaxY = -FLT_MAX;
+    for (int corner = 0; corner < 8; ++corner) {
+        const glm::vec3 point(
+            (corner & 1) ? boundsMax.x : boundsMin.x,
+            (corner & 2) ? boundsMax.y : boundsMin.y,
+            (corner & 4) ? boundsMax.z : boundsMin.z);
+        const glm::vec3 local = point - center;
+        const float x = glm::dot(local, viewRight);
+        const float y = glm::dot(local, viewUp);
+        projectedMinX = std::min(projectedMinX, x);
+        projectedMaxX = std::max(projectedMaxX, x);
+        projectedMinY = std::min(projectedMinY, y);
+        projectedMaxY = std::max(projectedMaxY, y);
+    }
+
+    const float projectedWidth = std::max(projectedMaxX - projectedMinX, 0.001f);
+    const float projectedHeight = std::max(projectedMaxY - projectedMinY, 0.001f);
+    const float padding = 8.0f;
+    const float scale = (thumbnailSize - padding * 2.0f) /
+                        std::max(projectedWidth, projectedHeight);
+    const float centerX = topLeft.x + thumbnailSize * 0.5f;
+    const float centerY = topLeft.y + thumbnailSize * 0.5f;
+
+    auto project = [&](const glm::vec3& point) {
+        const glm::vec3 local = point - center;
+        return ImVec2(centerX + glm::dot(local, viewRight) * scale,
+                      centerY - glm::dot(local, viewUp) * scale);
+    };
+
+    constexpr size_t kMaximumPreviewTriangles = 260;
+    const size_t triangleCount = mesh.indices_.size() / 3;
+    const size_t triangleStep =
+        std::max<size_t>(1, (triangleCount + kMaximumPreviewTriangles - 1) /
+                                kMaximumPreviewTriangles);
+    const glm::vec3 lightDirection = glm::normalize(glm::vec3(0.35f, 0.80f, 0.45f));
+
+    for (size_t triangle = 0; triangle < triangleCount; triangle += triangleStep) {
+        const size_t indexOffset = triangle * 3;
+        const uint32_t i0 = mesh.indices_[indexOffset + 0];
+        const uint32_t i1 = mesh.indices_[indexOffset + 1];
+        const uint32_t i2 = mesh.indices_[indexOffset + 2];
+        if (i0 >= mesh.vertices_.size() || i1 >= mesh.vertices_.size() ||
+            i2 >= mesh.vertices_.size()) {
+            continue;
+        }
+
+        const glm::vec3 p0 = mesh.vertices_[i0].getPosition();
+        const glm::vec3 p1 = mesh.vertices_[i1].getPosition();
+        const glm::vec3 p2 = mesh.vertices_[i2].getPosition();
+        if (!finitePoint(p0) || !finitePoint(p1) || !finitePoint(p2)) {
+            continue;
+        }
+
+        const glm::vec3 face = glm::cross(p1 - p0, p2 - p0);
+        const float faceLength = glm::length(face);
+        if (faceLength < 1.0e-7f) {
+            continue;
+        }
+
+        const glm::vec3 normal = face / faceLength;
+        const float lighting =
+            0.38f + 0.62f * std::abs(glm::dot(normal, lightDirection));
+        const int base = visible ? 142 : 82;
+        const int red = std::clamp(int(float(base) * lighting), 48, 178);
+        const int green = std::clamp(red + (visible ? 10 : 4), 52, 188);
+        const int blue = std::clamp(red + (visible ? 18 : 7), 56, 198);
+
+        const ImVec2 points[3] = {project(p0), project(p1), project(p2)};
+        drawList->AddConvexPolyFilled(points, 3, IM_COL32(red, green, blue, 235));
+        drawList->AddPolyline(points, 3, IM_COL32(35, 43, 49, 150),
+                              ImDrawFlags_Closed, 0.55f);
+    }
+
+    drawList->PopClipRect();
+}
 } // namespace
 
 // Default constructor - uses hardcoded configuration
@@ -334,11 +455,14 @@ void Application::setupCallbacks()
                 app->viewportLeftDragging_ = false;
                 if (app->showUi_ && !ImGui::GetIO().WantCaptureMouse &&
                     !ImGuizmo::IsOver()) {
-                    const float inspectorWidth =
-                        std::clamp(float(app->windowSize_.width) * 0.30f, 340.0f, 410.0f);
-                    constexpr float assetPanelHeight = 310.0f;
-                    if (float(xpos) < float(app->windowSize_.width) - inspectorWidth &&
-                        float(ypos) < float(app->windowSize_.height) - assetPanelHeight) {
+                    const float browserWidth =
+                        app->showAssetBrowser_ ? kAssetBrowserWidth : 0.0f;
+                    const float inspectorWidth = app->showInspector_
+                        ? std::clamp(float(app->windowSize_.width) * 0.30f, 340.0f, 410.0f)
+                        : 0.0f;
+                    if (float(xpos) >= browserWidth &&
+                        float(xpos) < float(app->windowSize_.width) - inspectorWidth &&
+                        float(ypos) >= kMainMenuBarHeight) {
                         app->viewportLeftPressed_ = true;
                         app->viewportLeftPressPosition_ =
                             glm::vec2(float(xpos), float(ypos));
@@ -1263,20 +1387,15 @@ void Application::renderAssetEditorPanel()
 
     ImGui::SetNextWindowPos(ImVec2(0.0f, kMainMenuBarHeight), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(kAssetBrowserWidth, panelHeight), ImGuiCond_Always);
-    ImGui::SetNextWindowBgAlpha(0.97f);
+    ImGui::SetNextWindowBgAlpha(0.98f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 12.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 10.0f));
     constexpr ImGuiWindowFlags assetWindowFlags =
         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoTitleBar;
     ImGui::Begin("##LeftAssetBrowser", nullptr, assetWindowFlags);
 
-    ImGui::TextUnformatted("ASSETS");
-    if (!models_.empty()) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("%d", int(models_[std::clamp(
-            selectedModelIndex_, 0, int(models_.size()) - 1)]->meshes().size()));
-    }
+    ImGui::TextUnformatted("ASSET BROWSER");
     ImGui::Spacing();
 
     if (models_.empty()) {
@@ -1312,11 +1431,17 @@ void Application::renderAssetEditorPanel()
     assetFilter.Draw("Search", -1.0f);
     ImGui::Spacing();
 
+    const bool hasSelection =
+        selectedMeshIndex_ >= 0 && selectedMeshIndex_ < int(meshes.size());
+    const float transformPanelHeight = hasSelection ? 264.0f : 0.0f;
     const float footerHeight = 34.0f;
-    const float listHeight = std::max(80.0f, ImGui::GetContentRegionAvail().y - footerHeight);
+    const float listHeight = std::max(
+        100.0f, ImGui::GetContentRegionAvail().y - footerHeight - transformPanelHeight);
+
     if (ImGui::BeginChild("##AssetList", ImVec2(0.0f, listHeight), false)) {
-        constexpr float thumbnailSize = 72.0f;
-        constexpr float cardWidth = 110.0f;
+        constexpr float cardWidth = 112.0f;
+        constexpr float thumbnailSize = 104.0f;
+        constexpr float cardHeight = 128.0f;
         const int columns = std::max(1, int(ImGui::GetContentRegionAvail().x / cardWidth));
         int visibleAssetIndex = 0;
 
@@ -1334,45 +1459,56 @@ void Application::renderAssetEditorPanel()
             ++visibleAssetIndex;
 
             ImGui::PushID(meshIndex);
-            ImGui::BeginGroup();
-
-            const ImVec2 imageTopLeft = ImGui::GetCursorScreenPos();
-            ImGui::InvisibleButton("##Thumbnail", ImVec2(thumbnailSize, thumbnailSize));
+            const ImVec2 cardTopLeft = ImGui::GetCursorScreenPos();
+            ImGui::InvisibleButton("##AssetCard", ImVec2(cardWidth - 6.0f, cardHeight));
             const bool selected = selectedMeshIndex_ == meshIndex;
             const bool hovered = ImGui::IsItemHovered();
+            const bool visibleOnScreen = ImGui::IsItemVisible();
             ImDrawList* drawList = ImGui::GetWindowDrawList();
-            const ImU32 background =
-                selected ? IM_COL32(39, 67, 88, 255)
-                         : (hovered ? IM_COL32(34, 39, 45, 255) : IM_COL32(27, 31, 36, 255));
+
+            const ImU32 cardBackground =
+                selected ? IM_COL32(38, 57, 72, 255)
+                         : (hovered ? IM_COL32(31, 36, 42, 255)
+                                    : IM_COL32(24, 28, 33, 255));
+            drawList->AddRectFilled(
+                cardTopLeft,
+                ImVec2(cardTopLeft.x + cardWidth - 6.0f, cardTopLeft.y + cardHeight),
+                cardBackground, 4.0f);
+
+            const ImVec2 imageTopLeft(cardTopLeft.x + 1.0f, cardTopLeft.y + 1.0f);
             drawList->AddRectFilled(
                 imageTopLeft,
                 ImVec2(imageTopLeft.x + thumbnailSize, imageTopLeft.y + thumbnailSize),
-                background, 3.0f);
+                IM_COL32(19, 23, 27, 255), 3.0f);
+            if (visibleOnScreen) {
+                drawMeshThumbnail(drawList, mesh, imageTopLeft, thumbnailSize,
+                                  mesh.editorVisible);
+            }
 
-            const glm::vec3 extent =
-                glm::max(mesh.maxBounds - mesh.minBounds, glm::vec3(0.001f));
-            const float maxExtent = std::max(extent.x, std::max(extent.y, extent.z));
-            const float halfWidth = 22.0f * std::max(0.25f, extent.x / maxExtent);
-            const float halfHeight = 22.0f * std::max(0.25f, extent.y / maxExtent);
-            const ImVec2 center(imageTopLeft.x + thumbnailSize * 0.5f,
-                                imageTopLeft.y + thumbnailSize * 0.5f);
-            const ImU32 assetColor =
-                mesh.editorVisible ? IM_COL32(132, 151, 166, 255)
-                                   : IM_COL32(75, 81, 87, 255);
-            drawList->AddRectFilled(
-                ImVec2(center.x - halfWidth, center.y - halfHeight),
-                ImVec2(center.x + halfWidth, center.y + halfHeight),
-                assetColor, 2.0f);
+            const ImVec2 labelMin(cardTopLeft.x + 5.0f,
+                                  cardTopLeft.y + thumbnailSize + 7.0f);
+            const ImVec2 labelMax(cardTopLeft.x + cardWidth - 10.0f,
+                                  cardTopLeft.y + cardHeight - 3.0f);
+            drawList->PushClipRect(labelMin, labelMax, true);
+            drawList->AddText(labelMin, mesh.editorVisible
+                                           ? IM_COL32(205, 211, 217, 255)
+                                           : IM_COL32(115, 121, 127, 255),
+                              displayName.c_str());
+            drawList->PopClipRect();
+
             if (selected) {
                 drawList->AddRect(
-                    imageTopLeft,
-                    ImVec2(imageTopLeft.x + thumbnailSize, imageTopLeft.y + thumbnailSize),
-                    IM_COL32(86, 156, 207, 255), 3.0f, 0, 1.5f);
+                    cardTopLeft,
+                    ImVec2(cardTopLeft.x + cardWidth - 6.0f, cardTopLeft.y + cardHeight),
+                    IM_COL32(83, 151, 201, 255), 4.0f, 0, 1.5f);
             }
 
             if (ImGui::IsItemClicked()) {
                 selectedMeshIndex_ = meshIndex;
                 selectedGizmoPivotValid_ = false;
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", displayName.c_str());
             }
             if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
                 const AssetDragPayload payload{selectedModelIndex_, meshIndex};
@@ -1380,14 +1516,6 @@ void Application::renderAssetEditorPanel()
                 ImGui::TextUnformatted(displayName.c_str());
                 ImGui::EndDragDropSource();
             }
-
-            const string shortName =
-                displayName.size() > 14 ? displayName.substr(0, 13) + "..." : displayName;
-            ImGui::TextUnformatted(shortName.c_str());
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", displayName.c_str());
-            }
-            ImGui::EndGroup();
             ImGui::PopID();
         }
 
@@ -1434,6 +1562,93 @@ void Application::renderAssetEditorPanel()
         } else {
             printLog("BistroScene.layout is missing or does not match the loaded model");
         }
+    }
+
+    if (hasSelection) {
+        auto& selectedMesh = meshes[selectedMeshIndex_];
+        ImGui::Separator();
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, IM_COL32(20, 24, 29, 255));
+        if (ImGui::BeginChild("##TransformPanel", ImVec2(0.0f, 0.0f), true)) {
+            const string selectedName = selectedMesh.name_.empty()
+                                            ? std::format("Mesh {}", selectedMeshIndex_)
+                                            : selectedMesh.name_;
+            ImGui::TextUnformatted("TRANSFORM");
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", selectedName.c_str());
+
+            const float operationWidth =
+                std::max(58.0f, (ImGui::GetContentRegionAvail().x - 8.0f) / 3.0f);
+            if (ImGui::Selectable("Move", gizmoOperation_ == 0, 0,
+                                  ImVec2(operationWidth, 25.0f))) {
+                gizmoOperation_ = 0;
+            }
+            ImGui::SameLine();
+            if (ImGui::Selectable("Rotate", gizmoOperation_ == 1, 0,
+                                  ImVec2(operationWidth, 25.0f))) {
+                gizmoOperation_ = 1;
+            }
+            ImGui::SameLine();
+            if (ImGui::Selectable("Scale", gizmoOperation_ == 2, 0,
+                                  ImVec2(operationWidth, 25.0f))) {
+                gizmoOperation_ = 2;
+            }
+
+            ImGui::Checkbox("Local", &gizmoLocalSpace_);
+            ImGui::SameLine();
+            ImGui::Checkbox("Snap", &gizmoSnapEnabled_);
+            if (gizmoSnapEnabled_) {
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(-1.0f);
+                if (gizmoOperation_ == 0) {
+                    ImGui::DragFloat("##MoveSnap", &gizmoTranslationSnap_, 0.01f,
+                                     0.01f, 10.0f, "%.2f");
+                } else if (gizmoOperation_ == 1) {
+                    ImGui::DragFloat("##RotateSnap", &gizmoRotationSnap_, 1.0f,
+                                     1.0f, 90.0f, "%.0f deg");
+                } else {
+                    ImGui::DragFloat("##ScaleSnap", &gizmoScaleSnap_, 0.01f,
+                                     0.01f, 1.0f, "%.2f");
+                }
+            }
+
+            float translation[3]{};
+            float rotation[3]{};
+            float scale[3]{1.0f, 1.0f, 1.0f};
+            ImGuizmo::DecomposeMatrixToComponents(
+                glm::value_ptr(selectedMesh.editorTransform), translation, rotation, scale);
+
+            ImGui::SetNextItemWidth(-1.0f);
+            bool transformChanged = ImGui::DragFloat3("Position", translation, 0.05f);
+            ImGui::SetNextItemWidth(-1.0f);
+            transformChanged |= ImGui::DragFloat3("Rotation", rotation, 0.5f);
+            ImGui::SetNextItemWidth(-1.0f);
+            transformChanged |=
+                ImGui::DragFloat3("Scale", scale, 0.01f, 0.001f, 100.0f);
+            if (transformChanged) {
+                ImGuizmo::RecomposeMatrixFromComponents(
+                    translation, rotation, scale,
+                    glm::value_ptr(selectedMesh.editorTransform));
+                selectedMesh.editorTransformDirty = true;
+            }
+
+            const float actionWidth =
+                std::max(64.0f, (ImGui::GetContentRegionAvail().x - 6.0f) * 0.5f);
+            const char* visibilityLabel =
+                selectedMesh.editorVisible ? "Hide Asset" : "Restore Asset";
+            if (ImGui::Button(visibilityLabel, ImVec2(actionWidth, 0.0f))) {
+                selectedMesh.editorVisible = !selectedMesh.editorVisible;
+                selectedMesh.editorTransformDirty = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Reset", ImVec2(actionWidth, 0.0f))) {
+                selectedMesh.editorTransform = glm::mat4(1.0f);
+                selectedMesh.editorVisible = true;
+                selectedMesh.editorTransformDirty = true;
+                selectedGizmoPivotValid_ = false;
+            }
+        }
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
     }
 
     ImGui::End();
