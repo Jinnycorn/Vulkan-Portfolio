@@ -12,7 +12,10 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <chrono>
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cctype>
+#include <limits>
 #include <unordered_map>
 #include <vector>
 
@@ -358,6 +361,7 @@ Application::Application(const ApplicationConfig& config)
     setupCallbacks();
     setupCamera(config.camera);
     loadModels(config.models);
+    initializeThirdPersonController();
 
     if (audioEngine_.initialize()) {
         audioEngine_.setVolume(bgmVolume_);
@@ -470,6 +474,187 @@ void Application::loadModels(const vector<ModelConfig>& modelConfigs)
     }
 }
 
+void Application::setThirdPersonPlayer(int modelIndex, int meshIndex)
+{
+    if (modelIndex < 0 || modelIndex >= static_cast<int>(models_.size()) ||
+        meshIndex < 0 ||
+        meshIndex >= static_cast<int>(models_[modelIndex]->meshes().size())) {
+        return;
+    }
+
+    thirdPersonModelIndex_ = modelIndex;
+    thirdPersonMeshIndex_ = meshIndex;
+    selectedModelIndex_ = modelIndex;
+    selectedMeshIndex_ = meshIndex;
+
+    Mesh& mesh = models_[modelIndex]->meshes()[meshIndex];
+    mesh.editorVisible = true;
+
+    glm::vec3 skew(0.0f);
+    glm::vec4 perspective(0.0f);
+    glm::decompose(mesh.editorTransform, thirdPersonBaseScale_,
+                   thirdPersonBaseRotation_, thirdPersonLocalTranslation_,
+                   skew, perspective);
+    thirdPersonBaseRotation_ = glm::normalize(thirdPersonBaseRotation_);
+    thirdPersonHeading_ = 0.0f;
+    thirdPersonEnabled_ = true;
+    updateThirdPersonCamera();
+
+    printLog("Third-person player asset: '{}' / '{}'",
+             models_[modelIndex]->name(), mesh.name_);
+}
+
+void Application::initializeThirdPersonController()
+{
+    int bestModel = -1;
+    int bestMesh = -1;
+    int bestNameScore = 0;
+    float bestFallbackScore = std::numeric_limits<float>::max();
+
+    const std::array<std::pair<const char*, int>, 9> preferredNames{{
+        {"motorcycle", 100}, {"motorbike", 100}, {"scooter", 95},
+        {"bike", 90}, {"moped", 90}, {"traffic_sign", 80},
+        {"street_sign", 80}, {"sign", 70}, {"signal", 60}
+    }};
+
+    for (int modelIndex = 0; modelIndex < static_cast<int>(models_.size());
+         ++modelIndex) {
+        Model& model = *models_[modelIndex];
+        for (int meshIndex = 0;
+             meshIndex < static_cast<int>(model.meshes().size()); ++meshIndex) {
+            Mesh& mesh = model.meshes()[meshIndex];
+            if (mesh.vertices_.empty() || !finitePoint(mesh.minBounds) ||
+                !finitePoint(mesh.maxBounds)) {
+                continue;
+            }
+
+            std::string name = mesh.name_;
+            std::transform(name.begin(), name.end(), name.begin(),
+                           [](unsigned char ch) {
+                               return static_cast<char>(std::tolower(ch));
+                           });
+
+            int nameScore = 0;
+            for (const auto& [token, score] : preferredNames) {
+                if (name.find(token) != std::string::npos) {
+                    nameScore = std::max(nameScore, score);
+                }
+            }
+
+            if (nameScore > bestNameScore) {
+                bestNameScore = nameScore;
+                bestModel = modelIndex;
+                bestMesh = meshIndex;
+            }
+
+            const glm::vec3 localExtent = mesh.maxBounds - mesh.minBounds;
+            const float worldSize =
+                glm::length(glm::mat3(model.modelMatrix()) * localExtent);
+            if (std::isfinite(worldSize) && worldSize > 0.25f &&
+                worldSize < 8.0f) {
+                const float fallbackScore = std::abs(worldSize - 2.5f);
+                if (bestNameScore == 0 && fallbackScore < bestFallbackScore) {
+                    bestFallbackScore = fallbackScore;
+                    bestModel = modelIndex;
+                    bestMesh = meshIndex;
+                }
+            }
+        }
+    }
+
+    if (bestModel >= 0 && bestMesh >= 0) {
+        setThirdPersonPlayer(bestModel, bestMesh);
+    } else {
+        thirdPersonEnabled_ = false;
+        printLog("No suitable temporary third-person player asset was found");
+    }
+}
+
+void Application::updateThirdPersonController(float deltaTime)
+{
+    if (!thirdPersonEnabled_ || thirdPersonModelIndex_ < 0 ||
+        thirdPersonModelIndex_ >= static_cast<int>(models_.size())) {
+        return;
+    }
+
+    Model& model = *models_[thirdPersonModelIndex_];
+    if (thirdPersonMeshIndex_ < 0 ||
+        thirdPersonMeshIndex_ >= static_cast<int>(model.meshes().size())) {
+        return;
+    }
+
+    Mesh& mesh = model.meshes()[thirdPersonMeshIndex_];
+    glm::vec3 input(0.0f);
+    if (camera_.keys.forward) input.z += 1.0f;
+    if (camera_.keys.backward) input.z -= 1.0f;
+    if (camera_.keys.left) input.x -= 1.0f;
+    if (camera_.keys.right) input.x += 1.0f;
+
+    if (glm::dot(input, input) > 0.0f) {
+        input = glm::normalize(input);
+
+        const float yaw = glm::radians(thirdPersonOrbitYaw_);
+        const glm::vec3 cameraForward =
+            glm::normalize(glm::vec3(-std::sin(yaw), 0.0f, -std::cos(yaw)));
+        const glm::vec3 cameraRight =
+            glm::normalize(glm::cross(cameraForward, glm::vec3(0.0f, 1.0f, 0.0f)));
+        const glm::vec3 worldDirection =
+            glm::normalize(cameraForward * input.z + cameraRight * input.x);
+        const glm::vec3 worldDelta =
+            worldDirection * thirdPersonMoveSpeed_ * deltaTime;
+        const glm::vec3 localDelta =
+            glm::mat3(glm::inverse(model.modelMatrix())) * worldDelta;
+
+        thirdPersonLocalTranslation_ += localDelta;
+        thirdPersonHeading_ =
+            glm::degrees(std::atan2(worldDirection.x, worldDirection.z));
+
+        const glm::quat heading =
+            glm::angleAxis(glm::radians(thirdPersonHeading_),
+                           glm::vec3(0.0f, 1.0f, 0.0f));
+        mesh.editorTransform =
+            glm::translate(glm::mat4(1.0f), thirdPersonLocalTranslation_) *
+            glm::mat4_cast(heading * thirdPersonBaseRotation_) *
+            glm::scale(glm::mat4(1.0f), thirdPersonBaseScale_);
+        mesh.editorTransformDirty = true;
+    }
+
+    updateThirdPersonCamera();
+}
+
+void Application::updateThirdPersonCamera()
+{
+    if (!thirdPersonEnabled_ || thirdPersonModelIndex_ < 0 ||
+        thirdPersonModelIndex_ >= static_cast<int>(models_.size())) {
+        return;
+    }
+
+    Model& model = *models_[thirdPersonModelIndex_];
+    if (thirdPersonMeshIndex_ < 0 ||
+        thirdPersonMeshIndex_ >= static_cast<int>(model.meshes().size())) {
+        return;
+    }
+
+    const Mesh& mesh = model.meshes()[thirdPersonMeshIndex_];
+    const glm::vec3 localTarget = mesh.editorPivot() + thirdPersonLocalTranslation_;
+    glm::vec3 target =
+        glm::vec3(model.modelMatrix() * glm::vec4(localTarget, 1.0f));
+
+    const glm::vec3 worldExtent =
+        glm::abs(glm::mat3(model.modelMatrix()) *
+                 (mesh.maxBounds - mesh.minBounds));
+    target.y += std::clamp(worldExtent.y * 0.55f, 0.45f, 1.8f);
+
+    const float yaw = glm::radians(thirdPersonOrbitYaw_);
+    const float pitch = glm::radians(thirdPersonOrbitPitch_);
+    const glm::vec3 offset(
+        std::sin(yaw) * std::cos(pitch),
+        std::sin(pitch),
+        std::cos(yaw) * std::cos(pitch));
+
+    camera_.setLookAt(target + offset * thirdPersonDistance_, target);
+}
+
 void Application::setupCallbacks()
 {
     window_.setUserPointer(this);
@@ -489,10 +674,15 @@ void Application::setupCallbacks()
                 app->showUi_ = !app->showUi_;
                 break;
             case GLFW_KEY_F2:
-                if (app->camera_.type == hlab::Camera::CameraType::lookat) {
-                    app->camera_.type = hlab::Camera::CameraType::firstperson;
+                app->thirdPersonEnabled_ = !app->thirdPersonEnabled_;
+                if (app->thirdPersonEnabled_) {
+                    if (app->thirdPersonModelIndex_ < 0) {
+                        app->initializeThirdPersonController();
+                    } else {
+                        app->updateThirdPersonCamera();
+                    }
                 } else {
-                    app->camera_.type = hlab::Camera::CameraType::lookat;
+                    app->camera_.type = hlab::Camera::CameraType::firstperson;
                 }
                 break;
             case GLFW_KEY_F3:
@@ -521,8 +711,9 @@ void Application::setupCallbacks()
                 break;
             }
 
-            // First person camera controls
-            if (app->camera_.type == hlab::Camera::firstperson) {
+            // Character movement in third person; camera movement otherwise.
+            if (app->thirdPersonEnabled_ ||
+                app->camera_.type == hlab::Camera::firstperson) {
                 switch (key) {
                 case GLFW_KEY_W:
                     app->camera_.keys.forward = true;
@@ -593,8 +784,9 @@ void Application::setupCallbacks()
                 break;
             }
         } else if (action == GLFW_RELEASE) {
-            // First person camera controls
-            if (app->camera_.type == hlab::Camera::firstperson) {
+            // Release shared movement state for both camera modes.
+            if (app->thirdPersonEnabled_ ||
+                app->camera_.type == hlab::Camera::firstperson) {
                 switch (key) {
                 case GLFW_KEY_W:
                     app->camera_.keys.forward = false;
@@ -691,7 +883,15 @@ void Application::setupCallbacks()
 
     window_.setScrollCallback([](GLFWwindow* window, double xoffset, double yoffset) {
         auto* app = static_cast<Application*>(glfwGetWindowUserPointer(window));
-        app->camera_.translate(glm::vec3(0.0f, 0.0f, (float)yoffset * 0.05f));
+        if (app->thirdPersonEnabled_) {
+            app->thirdPersonDistance_ = std::clamp(
+                app->thirdPersonDistance_ - static_cast<float>(yoffset) * 0.65f,
+                2.5f, 18.0f);
+            app->updateThirdPersonCamera();
+        } else {
+            app->camera_.translate(
+                glm::vec3(0.0f, 0.0f, static_cast<float>(yoffset) * 0.05f));
+        }
     });
 
     window_.setFramebufferSizeCallback([](GLFWwindow* window, int width, int height) {
@@ -815,6 +1015,7 @@ void Application::run()
         // must consume the exact same frame's view-projection matrices.
         {
             TRACY_CPU_SCOPE("Camera Update");
+            updateThirdPersonController(deltaTime);
             camera_.update(deltaTime);
             renderer_->sceneUBO().cameraPos = camera_.position;
         }
@@ -1490,6 +1691,43 @@ void Application::renderMainMenuBar()
             ImGui::Separator();
             if (ImGui::MenuItem(showUi_ ? "Hide workspace UI" : "Show workspace UI", "F1")) {
                 showUi_ = !showUi_;
+            }
+            ImGui::EndMenu();
+        }
+
+        if (showUi_ && ImGui::BeginMenu("Camera")) {
+            bool thirdPerson = thirdPersonEnabled_;
+            if (ImGui::MenuItem("Third Person Follow", "F2", &thirdPerson)) {
+                thirdPersonEnabled_ = thirdPerson;
+                if (thirdPersonEnabled_) {
+                    if (thirdPersonModelIndex_ < 0) {
+                        initializeThirdPersonController();
+                    } else {
+                        updateThirdPersonCamera();
+                    }
+                } else {
+                    camera_.type = Camera::CameraType::firstperson;
+                }
+            }
+
+            if (selectedModelIndex_ >= 0 &&
+                selectedModelIndex_ < static_cast<int>(models_.size()) &&
+                selectedMeshIndex_ >= 0 &&
+                selectedMeshIndex_ <
+                    static_cast<int>(models_[selectedModelIndex_]->meshes().size())) {
+                if (ImGui::MenuItem("Use selected asset as player")) {
+                    setThirdPersonPlayer(selectedModelIndex_, selectedMeshIndex_);
+                }
+            }
+
+            if (thirdPersonModelIndex_ >= 0 && thirdPersonMeshIndex_ >= 0) {
+                ImGui::Separator();
+                ImGui::TextDisabled("RMB drag: orbit");
+                ImGui::TextDisabled("Mouse wheel: zoom");
+                ImGui::SliderFloat("Distance", &thirdPersonDistance_, 2.5f, 18.0f,
+                                   "%.1f m");
+                ImGui::SliderFloat("Move speed", &thirdPersonMoveSpeed_, 1.0f,
+                                   12.0f, "%.1f m/s");
             }
             ImGui::EndMenu();
         }
@@ -2957,6 +3195,20 @@ void Application::handleMouseMove(int32_t x, int32_t y)
 
     int32_t dx = (int32_t)mouseState_.position.x - x;
     int32_t dy = (int32_t)mouseState_.position.y - y;
+
+    if (thirdPersonEnabled_) {
+        if (mouseState_.buttons.right) {
+            thirdPersonOrbitYaw_ -=
+                static_cast<float>(dx) * camera_.rotationSpeed;
+            thirdPersonOrbitPitch_ = std::clamp(
+                thirdPersonOrbitPitch_ +
+                    static_cast<float>(dy) * camera_.rotationSpeed,
+                -20.0f, 72.0f);
+            updateThirdPersonCamera();
+        }
+        mouseState_.position = glm::vec2((float)x, (float)y);
+        return;
+    }
 
     if (mouseState_.buttons.left) {
         bool rotateCamera = !showUi_;
