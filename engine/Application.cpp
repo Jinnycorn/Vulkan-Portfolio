@@ -511,7 +511,11 @@ void Application::initializeThirdPersonController()
     int bestNameScore = 0;
     float bestFallbackScore = std::numeric_limits<float>::max();
 
-    const std::array<std::pair<const char*, int>, 9> preferredNames{{
+    // Paris_Street_4 is the authored temporary character for this scene.
+    // Keep the vehicle/sign candidates only as fallbacks for configurations
+    // where that asset is not loaded.
+    const std::array<std::pair<const char*, int>, 10> preferredNames{{
+        {"paris_street_4", 1000},
         {"motorcycle", 100}, {"motorbike", 100}, {"scooter", 95},
         {"bike", 90}, {"moped", 90}, {"traffic_sign", 80},
         {"street_sign", 80}, {"sign", 70}, {"signal", 60}
@@ -528,16 +532,34 @@ void Application::initializeThirdPersonController()
                 continue;
             }
 
-            std::string name = mesh.name_;
-            std::transform(name.begin(), name.end(), name.begin(),
-                           [](unsigned char ch) {
-                               return static_cast<char>(std::tolower(ch));
-                           });
+            auto normalizeAssetName = [](std::string value) {
+                std::transform(value.begin(), value.end(), value.begin(),
+                               [](unsigned char ch) {
+                                   if (std::isalnum(ch)) {
+                                       return static_cast<char>(std::tolower(ch));
+                                   }
+                                   return '_';
+                               });
+                return value;
+            };
+
+            const std::string meshName = normalizeAssetName(mesh.name_);
+            const std::string modelName = normalizeAssetName(model.name());
 
             int nameScore = 0;
             for (const auto& [token, score] : preferredNames) {
-                if (name.find(token) != std::string::npos) {
+                // Prefer an exact mesh match. A model-name match is also
+                // accepted because imported assets may rename their meshes.
+                if (meshName == token) {
                     nameScore = std::max(nameScore, score);
+                } else if (meshName.find(token) != std::string::npos) {
+                    nameScore = std::max(nameScore, score - 1);
+                }
+
+                if (modelName == token) {
+                    nameScore = std::max(nameScore, score - 2);
+                } else if (modelName.find(token) != std::string::npos) {
+                    nameScore = std::max(nameScore, score - 3);
                 }
             }
 
