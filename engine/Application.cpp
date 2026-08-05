@@ -511,11 +511,11 @@ void Application::initializeThirdPersonController()
     int bestNameScore = 0;
     float bestFallbackScore = std::numeric_limits<float>::max();
 
-    // Paris_Street_4 is the authored temporary character for this scene.
-    // Keep the vehicle/sign candidates only as fallbacks for configurations
+    // _lod0_Vespa is the authored temporary character for this scene.
+    // Keep the other vehicle/sign candidates only as fallbacks for configurations
     // where that asset is not loaded.
     const std::array<std::pair<const char*, int>, 10> preferredNames{{
-        {"paris_street_4", 1000},
+        {"_lod0_vespa", 1000},
         {"motorcycle", 100}, {"motorbike", 100}, {"scooter", 95},
         {"bike", 90}, {"moped", 90}, {"traffic_sign", 80},
         {"street_sign", 80}, {"sign", 70}, {"signal", 60}
