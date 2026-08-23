@@ -109,6 +109,14 @@ void Context::selectPhysicalDevice()
     }
 
     uint32_t selectedDevice = 0;
+    for (uint32_t i = 0; i < gpuCount; ++i) {
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(physicalDevices[i], &properties);
+        if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+            selectedDevice = i;
+            break;
+        }
+    }
     physicalDevice_ = physicalDevices[selectedDevice];
 
     vkGetPhysicalDeviceProperties(physicalDevice_, &deviceProperties_);
@@ -132,7 +140,6 @@ void Context::selectPhysicalDevice()
 
     vkGetPhysicalDeviceMemoryProperties(physicalDevice_, &deviceMemoryProperties_);
 
-    // Print device memory properties
     printLog("\nDevice Memory Properties:");
     printLog("  Memory Type Count: {}", deviceMemoryProperties_.memoryTypeCount);
     for (uint32_t i = 0; i < deviceMemoryProperties_.memoryTypeCount; ++i) {
@@ -170,7 +177,6 @@ void Context::selectPhysicalDevice()
         printLog("    Memory Heap {}: {} MB, flags: {}", i, heap.size / (1024 * 1024), heapFlags);
     }
 
-    // Find queue family properties
     uint32_t queueFamilyCount;
     vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice_, &queueFamilyCount, nullptr);
     assert(queueFamilyCount > 0);
@@ -256,9 +262,9 @@ void Context::createPipelineCache()
 void Context::createInstance(vector<const char*> requiredInstanceExtensions)
 {
 #ifdef NDEBUG
-    bool useValidation = false; // Release build
+    bool useValidation = false;
 #else
-    bool useValidation = true; // Debug build
+    bool useValidation = true;
 #endif
 
     const uint32_t apiVersion = VK_API_VERSION_1_3;
@@ -277,13 +283,11 @@ void Context::createInstance(vector<const char*> requiredInstanceExtensions)
         }
     }
 
-    // print instanceExtensions
     printLog("Supported Instance Extensions:");
     for (const string& extension : supportedInstanceExtensions) {
         printLog("  {}", extension);
     }
 
-    // MoltenVK on macOS/iOS supported
     const char* portabilityExtension = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
     bool portabilityAlreadyAdded = false;
     for (const char* ext : requiredInstanceExtensions) {
@@ -292,10 +296,6 @@ void Context::createInstance(vector<const char*> requiredInstanceExtensions)
             break;
         }
     }
-
-    // Add VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME, "VK_KHR_xlib_surface" and
-    // "VK_KHR_wayland_surface" for MacOS, Linux support if they are available in
-    // supportedInstanceExtensions
 
     bool portabilitySupported =
         find(supportedInstanceExtensions.begin(), supportedInstanceExtensions.end(),
@@ -306,7 +306,6 @@ void Context::createInstance(vector<const char*> requiredInstanceExtensions)
         portabilityAlreadyAdded = true;
     }
 
-    // Validate all required extensions are supported
     for (const char* requiredExtension : requiredInstanceExtensions) {
         if (find(supportedInstanceExtensions.begin(), supportedInstanceExtensions.end(),
                  requiredExtension) == supportedInstanceExtensions.end()) {
@@ -327,20 +326,14 @@ void Context::createInstance(vector<const char*> requiredInstanceExtensions)
 
     if (portabilityAlreadyAdded) {
         instanceCreateInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
-        // Also need to enable the extension in ppEnabledExtensionNames
     }
 
     VkDebugUtilsMessengerCreateInfoEXT debugUtilsMessengerCI{};
     if (useValidation) {
         debugUtilsMessengerCI.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-        debugUtilsMessengerCI
-            .messageSeverity = // VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
-                               //  VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
-                               //  VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-            VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+        debugUtilsMessengerCI.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
         debugUtilsMessengerCI.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
                                             VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
-        // VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
         debugUtilsMessengerCI.pfnUserCallback = debugUtilsMessageCallback;
         debugUtilsMessengerCI.pNext = instanceCreateInfo.pNext;
         instanceCreateInfo.pNext = &debugUtilsMessengerCI;
@@ -354,7 +347,6 @@ void Context::createInstance(vector<const char*> requiredInstanceExtensions)
         }
     }
 
-    // print instanceExtensions
     printLog("Required Instance Extensions:");
     for (const char* extension : requiredInstanceExtensions) {
         printLog("  {}", extension);
@@ -370,7 +362,6 @@ void Context::createInstance(vector<const char*> requiredInstanceExtensions)
     vector<VkLayerProperties> instanceLayerProperties(instanceLayerCount);
     vkEnumerateInstanceLayerProperties(&instanceLayerCount, instanceLayerProperties.data());
 
-    // Sort layerProperties by layerName
     sort(instanceLayerProperties.begin(), instanceLayerProperties.end(),
          [](const VkLayerProperties& a, const VkLayerProperties& b) {
              return strcmp(a.layerName, b.layerName) < 0;
@@ -383,8 +374,6 @@ void Context::createInstance(vector<const char*> requiredInstanceExtensions)
 
     if (useValidation) {
         const char* validationLayerName = "VK_LAYER_KHRONOS_validation";
-
-        // Validation layer check
         bool validationLayerPresent = false;
         for (VkLayerProperties& layer : instanceLayerProperties) {
             if (strcmp(layer.layerName, validationLayerName) == 0) {
@@ -435,7 +424,6 @@ void Context::createLogicalDevice(bool useSwapChain)
 {
     const VkQueueFlags requestedQueueTypes = VK_QUEUE_COMPUTE_BIT | VK_QUEUE_GRAPHICS_BIT;
 
-    // Check for descriptor indexing extension support
     const char* descriptorIndexingExt = VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME;
     if (!extensionSupported(descriptorIndexingExt)) {
         exitWithMessage("Required extension \"{}\" is not supported by the selected GPU. "
@@ -443,7 +431,6 @@ void Context::createLogicalDevice(bool useSwapChain)
                         descriptorIndexingExt);
     }
 
-    // Query descriptor indexing features
     VkPhysicalDeviceDescriptorIndexingFeatures descriptorIndexingFeatures{};
     descriptorIndexingFeatures.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
@@ -454,7 +441,6 @@ void Context::createLogicalDevice(bool useSwapChain)
 
     vkGetPhysicalDeviceFeatures2(physicalDevice_, &deviceFeatures2);
 
-    // Check required descriptor indexing features
     if (!descriptorIndexingFeatures.descriptorBindingPartiallyBound ||
         !descriptorIndexingFeatures.runtimeDescriptorArray ||
         !descriptorIndexingFeatures.descriptorBindingVariableDescriptorCount) {
@@ -479,7 +465,6 @@ void Context::createLogicalDevice(bool useSwapChain)
     enabledFeatures13.synchronization2 = VK_TRUE;
 
     vector<VkDeviceQueueCreateInfo> queueCreateInfos{};
-
     const float defaultQueuePriority(0.0f);
 
     if (requestedQueueTypes & VK_QUEUE_GRAPHICS_BIT) {
@@ -497,7 +482,6 @@ void Context::createLogicalDevice(bool useSwapChain)
     if (requestedQueueTypes & VK_QUEUE_COMPUTE_BIT) {
         queueFamilyIndices_.compute = getQueueFamilyIndex(VK_QUEUE_COMPUTE_BIT);
         if (queueFamilyIndices_.compute != queueFamilyIndices_.graphics) {
-
             VkDeviceQueueCreateInfo queueInfo{};
             queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
             queueInfo.queueFamilyIndex = queueFamilyIndices_.compute;
@@ -506,7 +490,6 @@ void Context::createLogicalDevice(bool useSwapChain)
             queueCreateInfos.push_back(queueInfo);
         }
     } else {
-
         queueFamilyIndices_.compute = queueFamilyIndices_.graphics;
     }
 
@@ -514,7 +497,6 @@ void Context::createLogicalDevice(bool useSwapChain)
         queueFamilyIndices_.transfer = getQueueFamilyIndex(VK_QUEUE_TRANSFER_BIT);
         if ((queueFamilyIndices_.transfer != queueFamilyIndices_.graphics) &&
             (queueFamilyIndices_.transfer != queueFamilyIndices_.compute)) {
-
             VkDeviceQueueCreateInfo queueInfo{};
             queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
             queueInfo.queueFamilyIndex = queueFamilyIndices_.transfer;
@@ -530,15 +512,12 @@ void Context::createLogicalDevice(bool useSwapChain)
     if (useSwapChain) {
         deviceExtensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
     }
-
-    // Add descriptor indexing extension
     deviceExtensions.push_back(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME);
 
     enabledFeatures_.samplerAnisotropy = deviceFeatures_.samplerAnisotropy;
     enabledFeatures_.depthClamp = deviceFeatures_.depthClamp;
     enabledFeatures_.depthBiasClamp = deviceFeatures_.depthBiasClamp;
 
-    // Enable descriptor indexing features
     descriptorIndexingFeatures.descriptorBindingPartiallyBound = VK_TRUE;
     descriptorIndexingFeatures.runtimeDescriptorArray = VK_TRUE;
     descriptorIndexingFeatures.descriptorBindingVariableDescriptorCount = VK_TRUE;
@@ -554,7 +533,6 @@ void Context::createLogicalDevice(bool useSwapChain)
     physicalDeviceFeatures2.features = enabledFeatures_;
     physicalDeviceFeatures2.pNext = &enabledFeatures13;
 
-    // Chain descriptor indexing features
     enabledFeatures13.pNext = &descriptorIndexingFeatures;
 
     deviceCreateInfo.pEnabledFeatures = nullptr;
@@ -619,8 +597,7 @@ uint32_t Context::getQueueFamilyIndex(VkQueueFlags queueFlags) const
 
     exitWithMessage("Could not find a queue family that supports the requested queue flags: {}",
                     to_string(queueFlags));
-
-    return uint32_t(-1); // To avoid compiler warnings
+    return uint32_t(-1);
 }
 
 bool Context::extensionSupported(string extension)
@@ -755,7 +732,6 @@ void Context::waitGraphicsQueueIdle() const
 VkFormat Context::depthFormat() const
 {
     assert(depthFormat_ != VK_FORMAT_UNDEFINED);
-
     return depthFormat_;
 }
 
@@ -783,7 +759,6 @@ void Context::cleanup()
 {
     descriptorPool_.cleanup();
 
-    // Wait for all operations to complete before cleanup
     if (device_ != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device_);
     }
@@ -808,7 +783,6 @@ void Context::cleanup()
         vkDestroyCommandPool(device_, pool, nullptr);
     }
 
-    // Reset all pool handles
     graphicsCommandPool_ = VK_NULL_HANDLE;
     computeCommandPool_ = VK_NULL_HANDLE;
     transferCommandPool_ = VK_NULL_HANDLE;
@@ -831,14 +805,12 @@ void Context::cleanup()
 
 void Context::createQueues()
 {
-    // Validate queue family indices before getting queues
     if (queueFamilyIndices_.graphics == uint32_t(-1)) {
         exitWithMessage("Graphics queue family index is invalid");
     }
 
     vkGetDeviceQueue(device_, queueFamilyIndices_.graphics, 0, &graphicsQueue_);
 
-    // For compute: either get from dedicated family or use graphics queue
     if (queueFamilyIndices_.compute != queueFamilyIndices_.graphics &&
         queueFamilyIndices_.compute != uint32_t(-1)) {
         vkGetDeviceQueue(device_, queueFamilyIndices_.compute, 0, &computeQueue_);
@@ -846,7 +818,6 @@ void Context::createQueues()
         computeQueue_ = graphicsQueue_;
     }
 
-    // For transfer: either get from dedicated family or use appropriate fallback
     if (queueFamilyIndices_.transfer != queueFamilyIndices_.graphics &&
         queueFamilyIndices_.transfer != queueFamilyIndices_.compute &&
         queueFamilyIndices_.transfer != uint32_t(-1)) {
@@ -857,7 +828,6 @@ void Context::createQueues()
         transferQueue_ = graphicsQueue_;
     }
 
-    // Validate all queues were obtained
     if (graphicsQueue_ == VK_NULL_HANDLE) {
         exitWithMessage("Failed to get graphics queue");
     }
