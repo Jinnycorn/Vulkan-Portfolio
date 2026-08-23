@@ -43,10 +43,10 @@ GuiRenderer::GuiRenderer(Context& ctx, ShaderManager& shaderManager, VkFormat co
     ImVec4* colors = style.Colors;
     colors[ImGuiCol_Text] = ImVec4(0.90f, 0.93f, 0.97f, 1.00f);
     colors[ImGuiCol_TextDisabled] = ImVec4(0.48f, 0.54f, 0.64f, 1.00f);
-    colors[ImGuiCol_WindowBg] = ImVec4(0.035f, 0.055f, 0.090f, 0.96f);
-    colors[ImGuiCol_ChildBg] = ImVec4(0.045f, 0.070f, 0.110f, 0.92f);
-    colors[ImGuiCol_PopupBg] = ImVec4(0.040f, 0.060f, 0.095f, 0.98f);
-    colors[ImGuiCol_Border] = ImVec4(0.16f, 0.22f, 0.32f, 0.85f);
+    colors[ImGuiCol_WindowBg] = ImVec4(0.035f, 0.055f, 0.090f, 1.00f);
+    colors[ImGuiCol_ChildBg] = ImVec4(0.045f, 0.070f, 0.110f, 1.00f);
+    colors[ImGuiCol_PopupBg] = ImVec4(0.040f, 0.060f, 0.095f, 1.00f);
+    colors[ImGuiCol_Border] = ImVec4(0.16f, 0.22f, 0.32f, 1.00f);
     colors[ImGuiCol_FrameBg] = ImVec4(0.075f, 0.105f, 0.155f, 1.00f);
     colors[ImGuiCol_FrameBgHovered] = ImVec4(0.10f, 0.16f, 0.24f, 1.00f);
     colors[ImGuiCol_FrameBgActive] = ImVec4(0.12f, 0.20f, 0.30f, 1.00f);
@@ -65,12 +65,12 @@ GuiRenderer::GuiRenderer(Context& ctx, ShaderManager& shaderManager, VkFormat co
     colors[ImGuiCol_Tab] = ImVec4(0.060f, 0.090f, 0.135f, 1.00f);
     colors[ImGuiCol_TabHovered] = ImVec4(0.16f, 0.33f, 0.54f, 1.00f);
     colors[ImGuiCol_TabActive] = ImVec4(0.12f, 0.25f, 0.42f, 1.00f);
-    colors[ImGuiCol_ScrollbarBg] = ImVec4(0.025f, 0.040f, 0.065f, 0.80f);
+    colors[ImGuiCol_ScrollbarBg] = ImVec4(0.025f, 0.040f, 0.065f, 1.00f);
     colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.16f, 0.23f, 0.33f, 1.00f);
     colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.23f, 0.34f, 0.48f, 1.00f);
 
     // Keep the same visual hierarchy while making the complete editor palette
-    // substantially calmer. Alpha is preserved so panel transparency is unchanged.
+    // substantially calmer.
     for (int colorIndex = 0; colorIndex < ImGuiCol_COUNT; ++colorIndex) {
         float hue = 0.0f;
         float saturation = 0.0f;
@@ -89,9 +89,8 @@ GuiRenderer::GuiRenderer(Context& ctx, ShaderManager& shaderManager, VkFormat co
     io.ConfigWindowsMoveFromTitleBarOnly = true;
 
     {
-        // const string fontFileName = "../../assets/Roboto-Medium.ttf"; // English font
         const string fontFileName =
-            "../../assets/Noto_Sans_KR/static/NotoSansKR-SemiBold.ttf"; // Korean Font
+            "../../assets/Noto_Sans_KR/static/NotoSansKR-SemiBold.ttf";
 
         unsigned char* fontData = nullptr;
         int texWidth, texHeight;
@@ -122,20 +121,15 @@ GuiRenderer::GuiRenderer(Context& ctx, ShaderManager& shaderManager, VkFormat co
     }
 
     fontSampler_.createAnisoRepeat();
-
-    fontImage_->setSampler(fontSampler_.handle()); // VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-
+    fontImage_->setSampler(fontSampler_.handle());
     fontSet_.create(ctx_, guiPipeline_.layouts()[0], {*fontImage_});
 }
 
 GuiRenderer::~GuiRenderer()
 {
-    // Clean up ImGui context first
     if (ImGui::GetCurrentContext()) {
         ImGui::DestroyContext();
     }
-
-    // No manual cleanup required in current architecture.
 }
 
 auto GuiRenderer::imguiPipeline() -> Pipeline&
@@ -157,19 +151,14 @@ bool GuiRenderer::update(uint32_t frameIndex)
     VkDeviceSize vertexBufferSize = imDrawData->TotalVtxCount * sizeof(ImDrawVert);
     VkDeviceSize indexBufferSize = imDrawData->TotalIdxCount * sizeof(ImDrawIdx);
 
-    // Update current frame counts every frame (represents actual data size)
     vertexCount_ = imDrawData->TotalVtxCount;
     indexCount_ = imDrawData->TotalIdxCount;
 
-    // Use MappedBuffer's allocatedSize() for capacity checking - no GPU stalls!
     if ((frame.vertexBuffer.buffer() == VK_NULL_HANDLE) ||
         (vertexBufferSize > frame.vertexBuffer.allocatedSize())) {
-
-        // Calculate new capacity with growth factor to reduce frequent reallocations
         VkDeviceSize newCapacity =
             std::max(static_cast<VkDeviceSize>(vertexBufferSize * 1.5f),
-                     static_cast<VkDeviceSize>(512 * sizeof(ImDrawVert)) // Minimum capacity
-            );
+                     static_cast<VkDeviceSize>(512 * sizeof(ImDrawVert)));
 
         frame.vertexBuffer.createVertexBuffer(newCapacity, nullptr);
         updateCmdBuffers = true;
@@ -177,18 +166,14 @@ bool GuiRenderer::update(uint32_t frameIndex)
 
     if ((frame.indexBuffer.buffer() == VK_NULL_HANDLE) ||
         (indexBufferSize > frame.indexBuffer.allocatedSize())) {
-
-        // Calculate new capacity with growth factor to reduce frequent reallocations
         VkDeviceSize newCapacity =
             std::max(static_cast<VkDeviceSize>(indexBufferSize * 1.5f),
-                     static_cast<VkDeviceSize>(1024 * sizeof(ImDrawIdx)) // Minimum capacity
-            );
+                     static_cast<VkDeviceSize>(1024 * sizeof(ImDrawIdx)));
 
         frame.indexBuffer.createIndexBuffer(newCapacity, nullptr);
         updateCmdBuffers = true;
     }
 
-    // Copy ImGui data to this frame's buffers
     ImDrawVert* vtxDst = (ImDrawVert*)frame.vertexBuffer.mapped();
     ImDrawIdx* idxDst = (ImDrawIdx*)frame.indexBuffer.mapped();
 
@@ -200,7 +185,6 @@ bool GuiRenderer::update(uint32_t frameIndex)
         idxDst += cmd_list->IdxBuffer.Size;
     }
 
-    // Flush to ensure GPU visibility (synchronous)
     frame.vertexBuffer.flush();
     frame.indexBuffer.flush();
 
@@ -213,7 +197,7 @@ void GuiRenderer::draw(const VkCommandBuffer cmd, VkImageView swapchainImageView
     VkRenderingAttachmentInfo swapchainColorAttachment{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
     swapchainColorAttachment.imageView = swapchainImageView;
     swapchainColorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    swapchainColorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; // Preserve previous content
+    swapchainColorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
     swapchainColorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 
     VkRenderingInfo colorOnlyRenderingInfo{VK_STRUCTURE_TYPE_RENDERING_INFO_KHR};
@@ -227,11 +211,9 @@ void GuiRenderer::draw(const VkCommandBuffer cmd, VkImageView swapchainImageView
         return;
     }
 
-    // Get this frame's buffers
     auto& frame = *frameData_[frameIndex % frameData_.size()];
 
     vkCmdBeginRendering(cmd, &colorOnlyRenderingInfo);
-
     vkCmdSetViewport(cmd, 0, 1, &viewport);
 
     const auto descriptorSet = fontSet_.handle();
@@ -245,12 +227,10 @@ void GuiRenderer::draw(const VkCommandBuffer cmd, VkImageView swapchainImageView
     pc.translate = glm::vec2(-1.0f);
     pushConsts_.push(cmd, guiPipeline_.pipelineLayout());
 
-    // Bind this frame's vertex and index buffers
     VkDeviceSize offsets[1] = {0};
     vkCmdBindVertexBuffers(cmd, 0, 1, &frame.vertexBuffer.buffer(), offsets);
     vkCmdBindIndexBuffer(cmd, frame.indexBuffer.buffer(), 0, VK_INDEX_TYPE_UINT16);
 
-    // Render ImGui draw commands with fixed vertex offset bug
     int32_t vertexOffset = 0;
     int32_t indexOffset = 0;
 
