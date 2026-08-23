@@ -1,8 +1,6 @@
 #include "GuiRenderer.h"
 #include "PipelineConfig.h"
 
-#include <filesystem>
-
 namespace hlab {
 
 GuiRenderer::GuiRenderer(Context& ctx, ShaderManager& shaderManager, VkFormat colorFormat, uint32_t maxFramesInFlight)
@@ -17,8 +15,6 @@ GuiRenderer::GuiRenderer(Context& ctx, ShaderManager& shaderManager, VkFormat co
 
     pushConsts_.setStageFlags(VK_SHADER_STAGE_VERTEX_BIT);
 
-    // Renewed portfolio editor UI.
-    // Solid graphite surfaces + cool mint accent, with stronger hierarchy and spacing.
     ImGui::CreateContext();
     ImGui::StyleColorsDark();
 
@@ -26,142 +22,75 @@ GuiRenderer::GuiRenderer(Context& ctx, ShaderManager& shaderManager, VkFormat co
     style.Alpha = 1.0f;
     style.DisabledAlpha = 0.72f;
     style.WindowPadding = ImVec2(16.0f, 14.0f);
-    style.FramePadding = ImVec2(11.0f, 7.0f);
-    style.CellPadding = ImVec2(10.0f, 7.0f);
+    style.FramePadding = ImVec2(10.0f, 7.0f);
+    style.CellPadding = ImVec2(9.0f, 7.0f);
     style.ItemSpacing = ImVec2(10.0f, 9.0f);
     style.ItemInnerSpacing = ImVec2(7.0f, 6.0f);
-    style.TouchExtraPadding = ImVec2(0.0f, 0.0f);
     style.IndentSpacing = 20.0f;
     style.ScrollbarSize = 13.0f;
-    style.GrabMinSize = 12.0f;
-
+    style.GrabMinSize = 11.0f;
+    style.WindowRounding = 9.0f;
+    style.ChildRounding = 8.0f;
+    style.FrameRounding = 6.0f;
+    style.PopupRounding = 8.0f;
+    style.ScrollbarRounding = 8.0f;
+    style.GrabRounding = 6.0f;
+    style.TabRounding = 6.0f;
     style.WindowBorderSize = 1.0f;
     style.ChildBorderSize = 1.0f;
-    style.PopupBorderSize = 1.0f;
     style.FrameBorderSize = 1.0f;
-    style.TabBorderSize = 0.0f;
 
-    style.WindowRounding = 10.0f;
-    style.ChildRounding = 9.0f;
-    style.FrameRounding = 7.0f;
-    style.PopupRounding = 9.0f;
-    style.ScrollbarRounding = 9.0f;
-    style.GrabRounding = 7.0f;
-    style.TabRounding = 7.0f;
-
-    ImVec4* colors = style.Colors;
-
-    // Typography
-    colors[ImGuiCol_Text]                 = ImVec4(0.94f, 0.96f, 0.97f, 1.00f);
-    colors[ImGuiCol_TextDisabled]         = ImVec4(0.50f, 0.56f, 0.60f, 1.00f);
-
-    // Main surfaces: intentionally fully opaque.
-    colors[ImGuiCol_WindowBg]             = ImVec4(0.055f, 0.065f, 0.075f, 1.00f);
-    colors[ImGuiCol_ChildBg]              = ImVec4(0.070f, 0.080f, 0.090f, 1.00f);
-    colors[ImGuiCol_PopupBg]              = ImVec4(0.060f, 0.070f, 0.080f, 1.00f);
-    colors[ImGuiCol_MenuBarBg]            = ImVec4(0.035f, 0.043f, 0.050f, 1.00f);
-    colors[ImGuiCol_TitleBg]              = ImVec4(0.040f, 0.048f, 0.055f, 1.00f);
-    colors[ImGuiCol_TitleBgActive]        = ImVec4(0.055f, 0.070f, 0.076f, 1.00f);
-    colors[ImGuiCol_TitleBgCollapsed]     = ImVec4(0.040f, 0.048f, 0.055f, 1.00f);
-
-    // Borders / separators
-    colors[ImGuiCol_Border]               = ImVec4(0.16f, 0.19f, 0.20f, 1.00f);
-    colors[ImGuiCol_BorderShadow]         = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-    colors[ImGuiCol_Separator]            = ImVec4(0.15f, 0.18f, 0.19f, 1.00f);
-    colors[ImGuiCol_SeparatorHovered]     = ImVec4(0.20f, 0.72f, 0.67f, 1.00f);
-    colors[ImGuiCol_SeparatorActive]      = ImVec4(0.28f, 0.86f, 0.78f, 1.00f);
-
-    // Fields
-    colors[ImGuiCol_FrameBg]              = ImVec4(0.095f, 0.110f, 0.120f, 1.00f);
-    colors[ImGuiCol_FrameBgHovered]       = ImVec4(0.125f, 0.155f, 0.160f, 1.00f);
-    colors[ImGuiCol_FrameBgActive]        = ImVec4(0.145f, 0.195f, 0.195f, 1.00f);
-
-    // Mint accent
-    colors[ImGuiCol_CheckMark]            = ImVec4(0.26f, 0.88f, 0.77f, 1.00f);
-    colors[ImGuiCol_SliderGrab]           = ImVec4(0.22f, 0.72f, 0.66f, 1.00f);
-    colors[ImGuiCol_SliderGrabActive]     = ImVec4(0.30f, 0.92f, 0.82f, 1.00f);
-
-    // Buttons
-    colors[ImGuiCol_Button]               = ImVec4(0.105f, 0.135f, 0.140f, 1.00f);
-    colors[ImGuiCol_ButtonHovered]        = ImVec4(0.125f, 0.285f, 0.270f, 1.00f);
-    colors[ImGuiCol_ButtonActive]         = ImVec4(0.145f, 0.410f, 0.375f, 1.00f);
-
-    // Selectable/header rows
-    colors[ImGuiCol_Header]               = ImVec4(0.090f, 0.115f, 0.120f, 1.00f);
-    colors[ImGuiCol_HeaderHovered]        = ImVec4(0.115f, 0.270f, 0.255f, 1.00f);
-    colors[ImGuiCol_HeaderActive]         = ImVec4(0.130f, 0.390f, 0.355f, 1.00f);
-
-    // Tabs
-    colors[ImGuiCol_Tab]                  = ImVec4(0.065f, 0.080f, 0.087f, 1.00f);
-    colors[ImGuiCol_TabHovered]           = ImVec4(0.115f, 0.315f, 0.290f, 1.00f);
-    colors[ImGuiCol_TabActive]            = ImVec4(0.105f, 0.245f, 0.230f, 1.00f);
-    colors[ImGuiCol_TabUnfocused]         = ImVec4(0.050f, 0.060f, 0.067f, 1.00f);
-    colors[ImGuiCol_TabUnfocusedActive]   = ImVec4(0.075f, 0.125f, 0.125f, 1.00f);
-
-    // Scrollbars
-    colors[ImGuiCol_ScrollbarBg]          = ImVec4(0.045f, 0.052f, 0.058f, 1.00f);
-    colors[ImGuiCol_ScrollbarGrab]        = ImVec4(0.17f, 0.20f, 0.21f, 1.00f);
-    colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.21f, 0.35f, 0.34f, 1.00f);
-    colors[ImGuiCol_ScrollbarGrabActive]  = ImVec4(0.24f, 0.48f, 0.44f, 1.00f);
-
-    colors[ImGuiCol_ResizeGrip]           = ImVec4(0.17f, 0.34f, 0.32f, 1.00f);
-    colors[ImGuiCol_ResizeGripHovered]    = ImVec4(0.23f, 0.62f, 0.57f, 1.00f);
-    colors[ImGuiCol_ResizeGripActive]     = ImVec4(0.30f, 0.86f, 0.77f, 1.00f);
-
-    // Tables and selection
-    colors[ImGuiCol_TableHeaderBg]        = ImVec4(0.075f, 0.090f, 0.098f, 1.00f);
-    colors[ImGuiCol_TableBorderStrong]    = ImVec4(0.17f, 0.20f, 0.21f, 1.00f);
-    colors[ImGuiCol_TableBorderLight]     = ImVec4(0.11f, 0.13f, 0.14f, 1.00f);
-    colors[ImGuiCol_TableRowBg]           = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-    colors[ImGuiCol_TableRowBgAlt]        = ImVec4(0.075f, 0.085f, 0.092f, 1.00f);
-    colors[ImGuiCol_TextSelectedBg]       = ImVec4(0.12f, 0.42f, 0.38f, 1.00f);
-
-    // Plots / drag-drop / navigation
-    colors[ImGuiCol_PlotLines]            = ImVec4(0.34f, 0.86f, 0.78f, 1.00f);
-    colors[ImGuiCol_PlotLinesHovered]     = ImVec4(0.46f, 1.00f, 0.90f, 1.00f);
-    colors[ImGuiCol_PlotHistogram]        = ImVec4(0.26f, 0.76f, 0.69f, 1.00f);
-    colors[ImGuiCol_PlotHistogramHovered] = ImVec4(0.42f, 0.94f, 0.84f, 1.00f);
-    colors[ImGuiCol_DragDropTarget]       = ImVec4(0.36f, 1.00f, 0.85f, 1.00f);
-    colors[ImGuiCol_NavHighlight]         = ImVec4(0.28f, 0.88f, 0.78f, 1.00f);
-    colors[ImGuiCol_NavWindowingHighlight]= ImVec4(0.72f, 0.96f, 0.91f, 1.00f);
-    colors[ImGuiCol_NavWindowingDimBg]    = ImVec4(0.02f, 0.025f, 0.030f, 0.90f);
-    colors[ImGuiCol_ModalWindowDimBg]     = ImVec4(0.02f, 0.025f, 0.030f, 0.90f);
+    ImVec4* c = style.Colors;
+    c[ImGuiCol_Text]                 = ImVec4(0.94f, 0.96f, 0.98f, 1.00f);
+    c[ImGuiCol_TextDisabled]         = ImVec4(0.52f, 0.58f, 0.62f, 1.00f);
+    c[ImGuiCol_WindowBg]             = ImVec4(0.045f, 0.052f, 0.060f, 1.00f);
+    c[ImGuiCol_ChildBg]              = ImVec4(0.060f, 0.070f, 0.078f, 1.00f);
+    c[ImGuiCol_PopupBg]              = ImVec4(0.050f, 0.060f, 0.068f, 1.00f);
+    c[ImGuiCol_Border]               = ImVec4(0.15f, 0.18f, 0.20f, 1.00f);
+    c[ImGuiCol_FrameBg]              = ImVec4(0.085f, 0.100f, 0.110f, 1.00f);
+    c[ImGuiCol_FrameBgHovered]       = ImVec4(0.11f, 0.16f, 0.16f, 1.00f);
+    c[ImGuiCol_FrameBgActive]        = ImVec4(0.13f, 0.22f, 0.21f, 1.00f);
+    c[ImGuiCol_TitleBg]              = ImVec4(0.035f, 0.042f, 0.048f, 1.00f);
+    c[ImGuiCol_TitleBgActive]        = ImVec4(0.055f, 0.075f, 0.075f, 1.00f);
+    c[ImGuiCol_MenuBarBg]            = ImVec4(0.028f, 0.034f, 0.040f, 1.00f);
+    c[ImGuiCol_CheckMark]            = ImVec4(0.26f, 0.88f, 0.77f, 1.00f);
+    c[ImGuiCol_SliderGrab]           = ImVec4(0.22f, 0.72f, 0.66f, 1.00f);
+    c[ImGuiCol_SliderGrabActive]     = ImVec4(0.30f, 0.92f, 0.82f, 1.00f);
+    c[ImGuiCol_Button]               = ImVec4(0.10f, 0.14f, 0.15f, 1.00f);
+    c[ImGuiCol_ButtonHovered]        = ImVec4(0.13f, 0.29f, 0.27f, 1.00f);
+    c[ImGuiCol_ButtonActive]         = ImVec4(0.15f, 0.41f, 0.37f, 1.00f);
+    c[ImGuiCol_Header]               = ImVec4(0.09f, 0.12f, 0.13f, 1.00f);
+    c[ImGuiCol_HeaderHovered]        = ImVec4(0.12f, 0.27f, 0.25f, 1.00f);
+    c[ImGuiCol_HeaderActive]         = ImVec4(0.14f, 0.39f, 0.35f, 1.00f);
+    c[ImGuiCol_Separator]            = ImVec4(0.14f, 0.17f, 0.18f, 1.00f);
+    c[ImGuiCol_Tab]                  = ImVec4(0.06f, 0.075f, 0.082f, 1.00f);
+    c[ImGuiCol_TabHovered]           = ImVec4(0.12f, 0.31f, 0.29f, 1.00f);
+    c[ImGuiCol_TabActive]            = ImVec4(0.10f, 0.24f, 0.22f, 1.00f);
+    c[ImGuiCol_ScrollbarBg]          = ImVec4(0.035f, 0.042f, 0.048f, 1.00f);
+    c[ImGuiCol_ScrollbarGrab]        = ImVec4(0.16f, 0.20f, 0.21f, 1.00f);
+    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.22f, 0.35f, 0.34f, 1.00f);
+    c[ImGuiCol_ScrollbarGrabActive]  = ImVec4(0.26f, 0.48f, 0.44f, 1.00f);
 
     style.ScaleAllSizes(scale_);
-
     ImGuiIO& io = ImGui::GetIO();
     io.FontGlobalScale = scale_;
-    io.ConfigWindowsMoveFromTitleBarOnly = true;
 
     {
-        const string fontFileName =
-            "../../assets/Noto_Sans_KR/static/NotoSansKR-SemiBold.ttf";
-
+        const string fontFileName = "../../assets/Noto_Sans_KR/static/NotoSansKR-SemiBold.ttf";
         unsigned char* fontData = nullptr;
         int texWidth, texHeight;
-        ImGuiIO& io = ImGui::GetIO();
-
         ImFontConfig config;
         config.MergeMode = false;
 
-        if (std::filesystem::exists(fontFileName)) {
-            io.Fonts->AddFontFromFileTTF(fontFileName.c_str(), 17.0f * scale_, &config,
-                                         io.Fonts->GetGlyphRangesDefault());
-
-            config.MergeMode = true;
-            io.Fonts->AddFontFromFileTTF(fontFileName.c_str(), 17.0f * scale_, &config,
-                                         io.Fonts->GetGlyphRangesKorean());
-        } else {
-            printLog("Optional Korean font not found: {}. Using ImGui default font.",
-                     fontFileName);
-            io.Fonts->AddFontDefault();
-        }
-
+        io.Fonts->AddFontFromFileTTF(fontFileName.c_str(), 17.0f * scale_, &config,
+                                     io.Fonts->GetGlyphRangesDefault());
+        config.MergeMode = true;
+        io.Fonts->AddFontFromFileTTF(fontFileName.c_str(), 17.0f * scale_, &config,
+                                     io.Fonts->GetGlyphRangesKorean());
         io.Fonts->GetTexDataAsRGBA32(&fontData, &texWidth, &texHeight);
         if (!fontData) {
-            exitWithMessage("Failed to create ImGui font atlas");
+            exitWithMessage("Failed to load font data from: {}", fontFileName);
         }
-
         fontImage_->createFromPixelData(fontData, texWidth, texHeight, 4, false);
     }
 
@@ -185,43 +114,35 @@ auto GuiRenderer::imguiPipeline() -> Pipeline&
 bool GuiRenderer::update(uint32_t frameIndex)
 {
     ImDrawData* imDrawData = ImGui::GetDrawData();
-
     if (!imDrawData || imDrawData->TotalVtxCount == 0 || imDrawData->TotalIdxCount == 0) {
         return false;
     }
 
     auto& frame = *frameData_[frameIndex % frameData_.size()];
     bool updateCmdBuffers = false;
-
     VkDeviceSize vertexBufferSize = imDrawData->TotalVtxCount * sizeof(ImDrawVert);
     VkDeviceSize indexBufferSize = imDrawData->TotalIdxCount * sizeof(ImDrawIdx);
-
     vertexCount_ = imDrawData->TotalVtxCount;
     indexCount_ = imDrawData->TotalIdxCount;
 
     if ((frame.vertexBuffer.buffer() == VK_NULL_HANDLE) ||
         (vertexBufferSize > frame.vertexBuffer.allocatedSize())) {
-        VkDeviceSize newCapacity =
-            std::max(static_cast<VkDeviceSize>(vertexBufferSize * 1.5f),
-                     static_cast<VkDeviceSize>(512 * sizeof(ImDrawVert)));
-
+        VkDeviceSize newCapacity = std::max(static_cast<VkDeviceSize>(vertexBufferSize * 1.5f),
+                                            static_cast<VkDeviceSize>(512 * sizeof(ImDrawVert)));
         frame.vertexBuffer.createVertexBuffer(newCapacity, nullptr);
         updateCmdBuffers = true;
     }
 
     if ((frame.indexBuffer.buffer() == VK_NULL_HANDLE) ||
         (indexBufferSize > frame.indexBuffer.allocatedSize())) {
-        VkDeviceSize newCapacity =
-            std::max(static_cast<VkDeviceSize>(indexBufferSize * 1.5f),
-                     static_cast<VkDeviceSize>(1024 * sizeof(ImDrawIdx)));
-
+        VkDeviceSize newCapacity = std::max(static_cast<VkDeviceSize>(indexBufferSize * 1.5f),
+                                            static_cast<VkDeviceSize>(1024 * sizeof(ImDrawIdx)));
         frame.indexBuffer.createIndexBuffer(newCapacity, nullptr);
         updateCmdBuffers = true;
     }
 
     ImDrawVert* vtxDst = (ImDrawVert*)frame.vertexBuffer.mapped();
     ImDrawIdx* idxDst = (ImDrawIdx*)frame.indexBuffer.mapped();
-
     for (int n = 0; n < imDrawData->CmdListsCount; n++) {
         const ImDrawList* cmd_list = imDrawData->CmdLists[n];
         memcpy(vtxDst, cmd_list->VtxBuffer.Data, cmd_list->VtxBuffer.Size * sizeof(ImDrawVert));
@@ -232,7 +153,6 @@ bool GuiRenderer::update(uint32_t frameIndex)
 
     frame.vertexBuffer.flush();
     frame.indexBuffer.flush();
-
     return updateCmdBuffers;
 }
 
@@ -257,7 +177,6 @@ void GuiRenderer::draw(const VkCommandBuffer cmd, VkImageView swapchainImageView
     }
 
     auto& frame = *frameData_[frameIndex % frameData_.size()];
-
     vkCmdBeginRendering(cmd, &colorOnlyRenderingInfo);
     vkCmdSetViewport(cmd, 0, 1, &viewport);
 
@@ -278,7 +197,6 @@ void GuiRenderer::draw(const VkCommandBuffer cmd, VkImageView swapchainImageView
 
     int32_t vertexOffset = 0;
     int32_t indexOffset = 0;
-
     for (int32_t i = 0; i < imDrawData->CmdListsCount; i++) {
         const ImDrawList* cmd_list = imDrawData->CmdLists[i];
         for (int32_t j = 0; j < cmd_list->CmdBuffer.Size; j++) {
@@ -292,7 +210,6 @@ void GuiRenderer::draw(const VkCommandBuffer cmd, VkImageView swapchainImageView
             vkCmdDrawIndexed(cmd, pcmd->ElemCount, 1, indexOffset, vertexOffset, 0);
             indexOffset += pcmd->ElemCount;
         }
-
         vertexOffset += cmd_list->VtxBuffer.Size;
     }
 
