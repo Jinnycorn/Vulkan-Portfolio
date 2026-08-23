@@ -110,6 +110,14 @@ void Context::selectPhysicalDevice()
     }
 
     uint32_t selectedDevice = 0;
+    for (uint32_t i = 0; i < gpuCount; ++i) {
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(physicalDevices[i], &properties);
+        if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+            selectedDevice = i;
+            break;
+        }
+    }
     physicalDevice_ = physicalDevices[selectedDevice];
 
     vkGetPhysicalDeviceProperties(physicalDevice_, &deviceProperties_);
