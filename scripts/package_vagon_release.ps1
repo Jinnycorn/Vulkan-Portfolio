@@ -77,6 +77,28 @@ foreach ($relativePath in $runtimeAssetPaths) {
     Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
 }
 
+# Some historical LowRes files were accidentally stored as an LFS pointer inside
+# an LFS object. Replace only those invalid image placeholders in the staged
+# package so texture loading remains deterministic on a clean Vagon machine.
+$neutralPng = [Convert]::FromBase64String(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
+$replacedPointers = @()
+Get-ChildItem -LiteralPath (Join-Path $stageRoot "assets") -File -Recurse |
+    Where-Object { $_.Length -lt 512 } |
+    ForEach-Object {
+        $bytes = [IO.File]::ReadAllBytes($_.FullName)
+        $text = [Text.Encoding]::ASCII.GetString($bytes)
+        if ($text.StartsWith("version https://git-lfs.github.com/spec/v1")) {
+            [IO.File]::WriteAllBytes($_.FullName, $neutralPng)
+            $replacedPointers += $_.FullName.Substring($stageRoot.Length + 1)
+        }
+    }
+if ($replacedPointers.Count -gt 0) {
+    Write-Warning ("Replaced {0} malformed nested LFS image pointers with a neutral PNG:" -f $replacedPointers.Count)
+    $replacedPointers | ForEach-Object { Write-Warning "  $_" }
+}
+
 $dllSearchRoots = @(
     (Join-Path $repoRoot "x64/Release"),
     (Join-Path $buildRoot "examples/Ex14_Bistro/Release"),
@@ -114,6 +136,11 @@ Controls:
 
 Runtime requirement:
   A Vagon machine with a Vulkan-capable GPU and current graphics driver.
+
+Packaging note:
+  Historical LowRes image entries that contain nested Git LFS pointer text are
+  replaced with a valid neutral 1x1 PNG so a clean deployment cannot fail while
+  decoding those malformed source assets.
 "@
 Set-Content -LiteralPath (Join-Path $stageRoot "README-VAGON.txt") -Value $readme -Encoding UTF8
 
@@ -158,6 +185,20 @@ foreach ($relativePath in $largeLfsFiles) {
     if ((Get-Item -LiteralPath $path).Length -lt 1024) {
         throw "Package validation failed; Git LFS content was not materialized: $relativePath"
     }
+}
+
+$remainingPointers = @()
+Get-ChildItem -LiteralPath (Join-Path $stageRoot "assets") -File -Recurse |
+    Where-Object { $_.Length -lt 512 } |
+    ForEach-Object {
+        $bytes = [IO.File]::ReadAllBytes($_.FullName)
+        $text = [Text.Encoding]::ASCII.GetString($bytes)
+        if ($text.StartsWith("version https://git-lfs.github.com/spec/v1")) {
+            $remainingPointers += $_.FullName
+        }
+    }
+if ($remainingPointers.Count -gt 0) {
+    throw "Package validation failed; unresolved Git LFS pointers remain: $($remainingPointers -join ', ')"
 }
 
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
