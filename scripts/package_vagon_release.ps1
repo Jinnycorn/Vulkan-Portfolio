@@ -120,7 +120,7 @@ $requiredPackageFiles = @(
     "assets/shaders/deferredLighting.comp.spv",
     "assets/shaders/post.frag.spv",
     "assets/characters/Leonard/Bboy Hip Hop Move.fbx",
-    "assets/models/AmazonLumberyardBistroMorganMcGuire/exterior.obj",
+    "assets/models/AmazonLumberyardBistroMorganMcGuire/exterior_cache.bin",
     "assets/textures/golden_gate_hills_4k/specularGGX.ktx2",
     "assets/textures/golden_gate_hills_4k/diffuseLambertian.ktx2",
     "assets/textures/golden_gate_hills_4k/outputLUT.png",
@@ -138,7 +138,7 @@ foreach ($relativePath in $requiredPackageFiles) {
 
 $largeLfsFiles = @(
     "assets/characters/Leonard/Bboy Hip Hop Move.fbx",
-    "assets/models/AmazonLumberyardBistroMorganMcGuire/exterior.obj",
+    "assets/models/AmazonLumberyardBistroMorganMcGuire/exterior_cache.bin",
     "assets/textures/golden_gate_hills_4k/specularGGX.ktx2",
     "assets/textures/golden_gate_hills_4k/diffuseLambertian.ktx2"
 )
