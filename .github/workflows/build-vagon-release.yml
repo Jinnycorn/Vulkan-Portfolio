@@ -13,6 +13,10 @@ on:
       - "engine/**"
       - "examples/Ex14_Bistro/**"
 
+concurrency:
+  group: vagon-release-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
