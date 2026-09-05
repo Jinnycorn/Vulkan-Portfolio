@@ -81,7 +81,7 @@ foreach ($relativePath in $runtimeAssetPaths) {
 # an LFS object. Replace only those invalid image placeholders in the staged
 # package so texture loading remains deterministic on a clean Vagon machine.
 $neutralPng = [Convert]::FromBase64String(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mNk+M/wHwAF/gL+4xslAAAAAElFTkSuQmCC"
 )
 $replacedPointers = @()
 Get-ChildItem -LiteralPath (Join-Path $stageRoot "assets") -File -Recurse |
