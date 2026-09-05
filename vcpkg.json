@@ -1,5 +1,6 @@
 {
   "dependencies": [
+    "vulkan",
     "glfw3",
     "assimp",
     "glm",

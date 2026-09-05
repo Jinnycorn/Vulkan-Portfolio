@@ -1,0 +1,87 @@
+name: Build Vagon Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - portfolio-ex14-stable
+    paths:
+      - ".github/workflows/build-vagon-release.yml"
+      - "scripts/package_vagon_release.ps1"
+      - "CMakeLists.txt"
+      - "vcpkg.json"
+      - "engine/**"
+      - "examples/Ex14_Bistro/**"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-release:
+    name: Windows x64 Release
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    env:
+      VCPKG_DEFAULT_TRIPLET: x64-windows
+      VCPKG_FEATURE_FLAGS: manifests,binarycaching
+
+    steps:
+      - name: Check out source and Git LFS assets
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 1
+
+      - name: Verify Git LFS runtime assets
+        shell: pwsh
+        run: |
+          git lfs pull
+          $requiredAssets = @(
+            "assets/characters/Leonard/Bboy Hip Hop Move.fbx",
+            "assets/models/AmazonLumberyardBistroMorganMcGuire/exterior.obj",
+            "assets/textures/golden_gate_hills_4k/specularGGX.ktx2",
+            "assets/textures/golden_gate_hills_4k/diffuseLambertian.ktx2",
+            "assets/textures/golden_gate_hills_4k/outputLUT.png",
+            "assets/Noto_Sans_KR/static/NotoSansKR-SemiBold.ttf"
+          )
+          foreach ($asset in $requiredAssets) {
+            if (-not (Test-Path -LiteralPath $asset)) {
+              throw "Required runtime asset is missing: $asset"
+            }
+            if ((Get-Item -LiteralPath $asset).Length -lt 1024) {
+              throw "Runtime asset still looks like a Git LFS pointer: $asset"
+            }
+          }
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          if (-not $env:VCPKG_INSTALLATION_ROOT) {
+            throw "VCPKG_INSTALLATION_ROOT is not available on the runner."
+          }
+          cmake -S . -B build/vagon -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build Ex14_Bistro Release
+        shell: pwsh
+        run: |
+          cmake --build build/vagon --config Release --target Ex14_Bistro --parallel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package and validate Vagon ZIP
+        shell: pwsh
+        run: |
+          ./scripts/package_vagon_release.ps1 `
+            -BuildDirectory "build/vagon" `
+            -OutputDirectory "dist"
+
+      - name: Upload Vagon-ready ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: VulkanPortfolio-Vagon-Windows-x64
+          path: dist/VulkanPortfolio-Vagon-Windows-x64.zip
+          if-no-files-found: error
+          retention-days: 30
