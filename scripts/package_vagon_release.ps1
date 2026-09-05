@@ -56,7 +56,8 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "examples/Ex14_Bistro/DescriptorPool
 $runtimeAssetPaths = @(
     "assets/shaders",
     "assets/characters/Leonard",
-    "assets/models/AmazonLumberyardBistroMorganMcGuire",
+    "assets/models/AmazonLumberyardBistroMorganMcGuire/exterior_cache.bin",
+    "assets/models/AmazonLumberyardBistroMorganMcGuire/LowRes",
     "assets/textures/golden_gate_hills_4k",
     "assets/Noto_Sans_KR/static/NotoSansKR-SemiBold.ttf"
 )

@@ -16,7 +16,7 @@
     },
     {
       "name": "ktx",
-      "features": [ "tools", "vulkan" ]
+      "features": [ "vulkan" ]
     }
   ]
 }

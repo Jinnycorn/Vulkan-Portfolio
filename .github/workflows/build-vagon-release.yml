@@ -37,6 +37,14 @@ jobs:
           lfs: true
           fetch-depth: 1
 
+      - name: Restore vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: build/vagon/vcpkg_installed
+          key: windows-vcpkg-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            windows-vcpkg-
+
       - name: Verify Git LFS runtime assets
         shell: pwsh
         run: |
